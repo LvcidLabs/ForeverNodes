@@ -29,15 +29,24 @@ A modern, simple gathering panel for WoW: Forever that's part of your world map,
 
 ## Features
 
-- **Preloaded node locations** for herbalism, mining and fishing pools, ready the moment you install
-- **Docked to your world map:** the panel swaps places with the quest log in one click, or use it as a floating window
+- **Preloaded node locations** for herbalism, mining and fishing pools across Azeroth, ready the moment you install. No additional data imports necessary
+- **Docked to your world map:** the panel swaps places with the quest log in one click, or use it as a floating window if you prefer
 - **Pick exactly what shows:** tick the herbs, veins and pools you want, sorted by skill level or name, with your own skill shown in difficulty colors
-- **Clean minimap icons** that switch to a small colored marker once the game's own tracking takes over
+- **Clean minimap icons** that switch to a small colored marker once you're close enough for the game's own tracking to take over
 - **Fishing pools only appear while a fishing pole is equipped**
-- **Square and round minimaps** detected automatically, with an adjustable draw range
-- **Records new spots** you discover
-- **Fits your UI:** a native theme and an auto-detected EllesmereUI theme
+- **Square and round minimaps** are detected automatically, with an adjustable draw range
+- **Records new spots** you discover, so your map keeps growing as you play
 - **Minimap button:** left click opens the panel, right click toggles world map icons
+- **Fits your UI:** currently supports a native theme and an auto-detected EllesmereUI theme
+
+## Quality of life
+
+- **No tooltips on minimap icons:** they intentionally ignore the mouse, so hovering the minimap shows what's actually there (the real herb, vein or pool) instead of a map icon getting in the way
+- **One-click icon toggle:** right click the world map button (or the minimap button) to hide or show map icons instantly, without opening anything
+- **Uncluttered list:** nodes for professions you don't have are greyed out, so the ones you can gather stand out
+- **Smart recording:** herbs and veins are never mistaken for fishing pools, even if you pick one right after casting, and spots you've already found aren't saved twice
+- **Separate scales** for the docked and floating panel, so each can be sized to fit
+- **Lightweight:** icons are reused rather than recreated, and only nodes near you are checked as you move, so it stays smooth even with every node type enabled
 
 ## Getting started
 
