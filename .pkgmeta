@@ -1,7 +1,9 @@
 # What the CurseForge packager puts in the release zip.
-# Tools (the merge tool) is for the author, not for players.
+# Tools (the merge tool) is for the author, not for players; media and README are for GitHub.
 package-as: ForeverNodes
 
 ignore:
   - Tools
   - .github
+  - media
+  - README.md
