@@ -61,6 +61,7 @@ FN.defaults = {
     dotRingWidth = 1,
     dotRingColor = { 0, 0, 0, 0.345 }, -- black, about a third opaque
     showAll = false, -- professions the character lacks can be opened (they are always listed, greyed)
+    onlyTracked = true, -- herbs show only while Find Herbs is on, ore only while Find Minerals is on
     record = true,   -- save the spot of fishing pools the character fishes from
     recordHerb = true, -- save the spot of herbs the character gathers
     recordOre = true,  -- save the spot of veins the character mines
@@ -113,6 +114,73 @@ local function CheckPole()
     local weapon = Enum and Enum.ItemClass and Enum.ItemClass.Weapon or 2
     local pole = Enum and Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Fishingpole or 20
     return classID == weapon and subClassID == pole
+end
+
+-- Find Herbs / Find Minerals: which one is on. Each kind is true (tracking on),
+-- false (the character has it but it is off) or nil (no such tracking spell, or
+-- the game gave no answer); only false hides that kind's nodes.
+local TRACK_SPELL = { herb = 2383, ore = 2580 }
+local TRACK_ICON = {
+    herb = { [133939] = true, ["interface\\icons\\inv_misc_flower_02"] = true },
+    ore = { [136025] = true, ["interface\\icons\\spell_nature_earthquake"] = true },
+}
+
+local function SpellName(id)
+    if C_Spell and C_Spell.GetSpellName then return C_Spell.GetSpellName(id) end
+    if GetSpellInfo then return (GetSpellInfo(id)) end
+end
+
+-- Which tracking kind a tracking entry is, from its spell, icon or name.
+local function TrackKind(name, texture, spellID)
+    if type(texture) == "string" then texture = texture:lower() end
+    for kind, id in pairs(TRACK_SPELL) do
+        if spellID == id or (texture and TRACK_ICON[kind][texture])
+            or (name and name == SpellName(id)) then
+            return kind
+        end
+    end
+end
+
+local tracking = {}
+local function ReadTracking()
+    local state = {}
+    if C_Minimap and C_Minimap.GetNumTrackingTypes and C_Minimap.GetTrackingInfo then
+        for i = 1, C_Minimap.GetNumTrackingTypes() or 0 do
+            local name, texture, active, spellID
+            local info = C_Minimap.GetTrackingInfo(i)
+            if type(info) == "table" then
+                name, texture, active, spellID = info.name, info.texture, info.active, info.spellID
+            else
+                local _
+                name, texture, active, _, _, spellID = C_Minimap.GetTrackingInfo(i)
+            end
+            local kind = TrackKind(name, texture, spellID)
+            if kind then state[kind] = active and true or false end
+        end
+    elseif GetTrackingTexture then
+        -- Older clients: one tracking at a time, known only by its icon.
+        local on = TrackKind(nil, GetTrackingTexture())
+        for kind, id in pairs(TRACK_SPELL) do
+            if IsPlayerSpell and IsPlayerSpell(id) then state[kind] = (on == kind) end
+        end
+    end
+    return state
+end
+
+-- Re-reads tracking; true when it changed.
+local function UpdateTracking()
+    local state = ReadTracking()
+    local changed = state.herb ~= tracking.herb or state.ore ~= tracking.ore
+    tracking = state
+    return changed
+end
+
+-- Whether a ticked node type is shown right now.
+local function Showable(node)
+    -- Pools have no tracking spell: they show while a pole is in hand.
+    if node.kind == "fish" then return poleEquipped end
+    if db.onlyTracked and tracking[node.kind] == false then return false end
+    return true
 end
 
 -- Pin frames (shared by minimap and world map) -------------------------------
@@ -276,8 +344,7 @@ local function RebuildGrid()
     ClearMinimap()
     wipe(grid)
     for _, node in ipairs(FN.nodes) do
-        -- Pools have no tracking spell: they show on the minimap while a pole is in hand.
-        if db.enabled[node.key] and (node.kind ~= "fish" or poleEquipped) then
+        if FN.enabled[node.key] and Showable(node) then
             local list = WorldPoints(node.key)
             for i = 1, #list do
                 local point = list[i]
@@ -472,8 +539,8 @@ local function RefreshWorldMapNow()
     if not mapID then return end
 
     for _, node in ipairs(FN.nodes) do
-        -- Pools show only while a pole is in hand, as on the minimap.
-        if db.enabled[node.key] and (node.kind ~= "fish" or poleEquipped) then
+        -- Same rules as the minimap (pole for pools, tracking for herbs and ore).
+        if FN.enabled[node.key] and Showable(node) then
             local flat = FN.points[node.key][mapID]
             if flat then
                 for i = 1, #flat, 2 do
@@ -505,7 +572,7 @@ end
 -- Call after locations were added to a node (Record.lua).
 function FN:PointsChanged(key)
     worldCache[key] = nil
-    if db.enabled[key] then FN:Refresh() end
+    if FN.enabled[key] then FN:Refresh() end
     if FN.RefreshOptions then FN:RefreshOptions() end
 end
 
@@ -528,6 +595,17 @@ local function InitDB()
             if node.kind == "fish" then db.enabled[node.key] = true end
         end
     end
+
+    -- Which nodes are ticked is kept per character (characters gather at different
+    -- skill levels); everything else stays account-wide. The account-wide list above
+    -- is only the starting point a character copies the first time it logs in.
+    ForeverNodesCharDB = ForeverNodesCharDB or {}
+    local char = ForeverNodesCharDB
+    if type(char.enabled) ~= "table" then
+        char.enabled = {}
+        for key, on in pairs(db.enabled) do char.enabled[key] = on end
+    end
+    FN.enabled = char.enabled
 
     -- Herbs and ore were recorded under one setting before; each now has its own.
     if type(db.recordGather) == "boolean" then
@@ -583,6 +661,7 @@ driver:RegisterEvent("PLAYER_LOGIN")
 driver:RegisterEvent("PLAYER_ENTERING_WORLD")
 driver:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 driver:RegisterEvent("SKILL_LINES_CHANGED")
+driver:RegisterEvent("MINIMAP_UPDATE_TRACKING")
 
 local elapsedSince, sincePoleCheck = 0, 0
 local function OnUpdate(_, elapsed)
@@ -601,6 +680,11 @@ local function OnUpdate(_, elapsed)
             QueueWorldMapRefresh()
             RebuildGrid()
         end
+        -- Same for tracking, in case MINIMAP_UPDATE_TRACKING was missed.
+        if UpdateTracking() and db.onlyTracked then
+            QueueWorldMapRefresh()
+            RebuildGrid()
+        end
     end
     UpdateMinimap()
 end
@@ -612,7 +696,7 @@ local function PrintPoleInfo()
     if id then classID, subClassID = select(6, C_Item.GetItemInfoInstant(id)) end
     local pools = 0
     for _, node in ipairs(FN.nodes) do
-        if node.kind == "fish" and db.enabled[node.key] then pools = pools + 1 end
+        if node.kind == "fish" and FN.enabled[node.key] then pools = pools + 1 end
     end
     print(("|cffffd100Forever Nodes|r main hand item %s, class %s, subclass %s, fishing pole: %s, pool types ticked: %d")
         :format(tostring(id), tostring(classID), tostring(subClassID), tostring(CheckPole()), pools))
@@ -627,6 +711,7 @@ driver:SetScript("OnEvent", function(self, event, arg1)
         return
     elseif event == "PLAYER_LOGIN" then
         poleEquipped = CheckPole()
+        UpdateTracking()
         if FN.LoadRecorded then FN:LoadRecorded() end -- pools recorded in earlier sessions
         RebuildGrid()
         self:SetScript("OnUpdate", OnUpdate)
@@ -638,7 +723,7 @@ driver:SetScript("OnEvent", function(self, event, arg1)
             end
         end
         FN:SetupButtons()
-        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.1.1"
+        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.1.2"
         -- Gold name, white version, gold author; the hint goes on its own indented line.
         -- The yellow star is the game's own raid target marker, drawn at text height.
         print(("|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t |cffffd100Forever Nodes|r |cffffffffv%s by Lvcid|r"
@@ -654,6 +739,9 @@ driver:SetScript("OnEvent", function(self, event, arg1)
         UpdateMinimap()
     elseif event == "SKILL_LINES_CHANGED" then
         if FN.RefreshOptions then FN:RefreshOptions() end
+        if UpdateTracking() and db.onlyTracked then FN:Refresh() end -- a tracking spell learned
+    elseif event == "MINIMAP_UPDATE_TRACKING" then
+        if UpdateTracking() and db.onlyTracked then FN:Refresh() end
     end
 end)
 

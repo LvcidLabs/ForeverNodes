@@ -685,8 +685,8 @@ local function CreateRow(parent)
 
     r:SetScript("OnClick", function(self)
         local key = self.node.key
-        FN.db.enabled[key] = (not FN.db.enabled[key]) or nil
-        self.mark:SetShown(FN.db.enabled[key] and true or false)
+        FN.enabled[key] = (not FN.enabled[key]) or nil
+        self.mark:SetShown(FN.enabled[key] and true or false)
         FN:Refresh()
     end)
     return r
@@ -697,7 +697,7 @@ local function RefreshNodes()
     local db = FN.db
 
     -- The profession picked in the left list. One this character lacks is only
-    -- opened while "Disable professions I don't have" is off.
+    -- opened while "Lock professions I don't have" is off.
     local skills = {}
     for _, kind in ipairs(FN.kinds) do skills[kind] = FN:GetSkill(kind) end
     local current = page.kind
@@ -760,7 +760,7 @@ local function RefreshNodes()
         row.node = node
         row.icon:SetTexture(node.icon)
         row.name:SetText(node.name)
-        row.mark:SetShown(db.enabled[node.key] and true or false)
+        row.mark:SetShown(FN.enabled[node.key] and true or false)
         local r, g, b, tinted = Difficulty(skill, node.skill)
         row.skill:SetText(node.skill > 0 and node.skill or "")
         row.skill:SetTextColor(r, g, b)
@@ -790,7 +790,7 @@ local function BuildNodesPage(page)
 
     local function SetAll(state)
         for _, node in ipairs(nodesPage.list or {}) do
-            FN.db.enabled[node.key] = state or nil
+            FN.enabled[node.key] = state or nil
         end
         FN:Refresh()
         RefreshNodes()
@@ -814,7 +814,7 @@ local function BuildNodesPage(page)
     nodesPage.scroll = Scroller(page)
 
     nodesPage.empty = Label(page, "GameFontDisable",
-        "This character has no gathering profession.\n\nTurn off \"Disable professions I don't have\" under Settings > Professions to see every node.")
+        "This character has no gathering profession.\n\nTurn off \"Lock professions I don't have\" under Settings > Professions to see every node.")
     nodesPage.fishNote = Label(page, "GameFontDisableSmall",
         "")
     -- "equipped" is green while a pole is in hand, red otherwise: a quick check that the addon sees it.
@@ -1139,20 +1139,40 @@ local function BuildSettingsPage(columnA, columnB)
 
     -- Colors -------------------------------------------------------------------
     -- Professions: each one's color, and whether ones the character lacks can be opened.
-    _, page = Add(sectionsA, columnA, "colors", "Professions", 70)
+    _, page = Add(sectionsA, columnA, "colors", "Professions", 94)
     local note = Label(page, "GameFontDisableSmall", "Shared by the circle and the dot.")
     note:SetPoint("TOPLEFT", 0, 0)
     Swatch(page, "Herbs", function() return db.colors.herb end):SetPoint("TOPLEFT", 0, -20)
     Swatch(page, "Mining", function() return db.colors.ore end):SetPoint("TOPLEFT", 78, -20)
     Swatch(page, "Fishing", function() return db.colors.fish end):SetPoint("TOPLEFT", 156, -20)
+    -- Labels that name a profession in its own color, repainted when a swatch changes.
+    local recordLabels = {}
+    local function Hex(kind)
+        local c = db.colors[kind]
+        local function Byte(v) return math.floor((v or 1) * 255 + 0.5) end
+        return ("%02x%02x%02x"):format(Byte(c[1]), Byte(c[2]), Byte(c[3]))
+    end
+    -- Herbs need Find Herbs on and ore Find Minerals (characters without the spell see them anyway).
+    local tracked = Check(page, "Only show herbs/ore when tracked",
+        function() return db.onlyTracked end,
+        function(v)
+            db.onlyTracked = v and true or false
+            FN:Refresh()
+        end)
+    tracked:SetPoint("TOPLEFT", 0, -50)
+    local function PaintTracked()
+        tracked:SetLabel("Only show |cff" .. Hex("herb") .. "herbs|r/|cff" .. Hex("ore") .. "ore|r when tracked")
+    end
+    syncers[#syncers + 1] = PaintTracked
+    recordLabels[#recordLabels + 1] = PaintTracked
     -- Professions the character lacks are always listed, greyed out; ticked (the default)
     -- they cannot be opened. The saved setting is the other way round (showAll).
-    Check(page, "Disable professions I don't have",
+    Check(page, "Lock professions I don't have",
         function() return not db.showAll end,
         function(v)
             db.showAll = not v
             FN:RefreshOptions()
-        end):SetPoint("TOPLEFT", 0, -50)
+        end):SetPoint("TOPLEFT", 0, -74)
 
     -- Nearby nodes -------------------------------------------------------------
     local GROUP_TOP, CIRCLE_HEIGHT, DOT_HEIGHT, RING_HEIGHT = 86, 156, 152, 122
@@ -1263,12 +1283,6 @@ local function BuildSettingsPage(columnA, columnB)
     -- or vein when it is gathered, a pool when loot comes out of it); new types join
     -- their list unticked. The profession's word is in that profession's own color
     -- (Colors section), and follows it when it changes.
-    local recordLabels = {}
-    local function Hex(kind)
-        local c = db.colors[kind]
-        local function Byte(v) return math.floor((v or 1) * 255 + 0.5) end
-        return ("%02x%02x%02x"):format(Byte(c[1]), Byte(c[2]), Byte(c[3]))
-    end
     for i, rec in ipairs({
         { key = "recordHerb", kind = "herb", before = "Record new ", word = "herb", after = " locations" },
         { key = "recordOre", kind = "ore", before = "Record new ", word = "mining", after = " locations" },
