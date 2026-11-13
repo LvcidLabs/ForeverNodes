@@ -4,8 +4,6 @@
 
 A modern, simple gathering panel for WoW: Forever that's part of your world map, with node toggles only a click away. Comes preloaded with most known herbalism, mining and fishing locations. Made exclusively for WoW: Forever and heavily inspired by GatherMate2.
 
-**Download:** [CurseForge](https://www.curseforge.com/wow/addons/forever-nodes) · [GitHub releases](https://github.com/LvcidLabs/ForeverNodes/releases)
-
 <p align="center">
   <img src="https://github.com/user-attachments/assets/e91a1133-fe5d-4147-aa03-50926119ffa8" alt="The Herbalism panel docked to the world map" width="100%">
 </p>
