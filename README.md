@@ -39,7 +39,7 @@ A modern, simple gathering panel for WoW: Forever that's part of your world map,
 2. Click the **Forever Nodes** button in the bottom-right corner (or use the minimap button, or type `/fn`).
 3. Tick whichever nodes you want to track.
 
-Herbs and ore start hidden and fishing pools start on. Professions your character doesn't have are greyed out; you can unlock them in Settings → Professions.
+Herbs and ore start hidden and fishing pools start on. Your ticks are saved per character, so each one can track its own nodes. Professions your character doesn't have are greyed out; you can unlock them in Settings → Professions.
 
 <br>
 
@@ -50,6 +50,7 @@ Herbs and ore start hidden and fishing pools start on. Professions your characte
 - **Pick exactly what shows:** tick the herbs, veins and pools you want, sorted by skill level or name, with your own skill shown in difficulty colors
 - **Clean minimap icons** that switch to a small colored marker once you're close enough for the game's own tracking to take over
 - **Fishing pools only appear while a fishing pole is equipped**
+- **Only show what you're tracking:** herbs appear while Find Herbs is on and ore while Find Minerals is on, so switching tracking switches the map too (on by default, and characters without the tracking spell still see them)
 - **Square and round minimaps** are detected automatically, with an adjustable draw range
 - **Records new spots** you discover, so your map keeps growing as you play
 - **Minimap button:** left click opens the panel, right click toggles world map icons
@@ -63,6 +64,7 @@ Herbs and ore start hidden and fishing pools start on. Professions your characte
 - **One-click icon toggle:** right click the world map button (or the minimap button) to hide or show map icons instantly, without opening anything
 - **Uncluttered list:** nodes for professions you don't have are greyed out, so the ones you can gather stand out
 - **Smart recording:** herbs and veins are never mistaken for fishing pools, even if you pick one right after casting, and spots you've already found aren't saved twice
+- **Per-character node lists:** each character keeps its own ticked herbs, veins and pools, so a low-level alt and your main can track different things. Everything else (looks, colors, recorded spots, window) is shared across your account
 - **Separate scales** for the docked and floating panel, so each can be sized to fit
 - **Lightweight:** icons are reused rather than recreated, and only nodes near you are checked as you move, so it stays smooth even with every node type enabled
 
