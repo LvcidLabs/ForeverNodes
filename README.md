@@ -27,6 +27,12 @@ A modern, simple gathering panel for WoW: Forever that's part of your world map,
   </tr>
 </table>
 
+## How to Install
+
+**CurseForge:** install it from the [Forever Nodes CurseForge page](https://www.curseforge.com/wow/addons/forever-nodes) or the CurseForge app.
+
+**Manually:** download the zip from the [releases page](https://github.com/LvcidLabs/ForeverNodes/releases) and extract it into `World of Warcraft\_forever_\Interface\AddOns\`, so you end up with `AddOns\ForeverNodes\ForeverNodes.toc`.
+
 ## Features
 
 - **Preloaded node locations** for herbalism, mining and fishing pools across Azeroth, ready the moment you install. No additional data imports necessary
@@ -55,10 +61,6 @@ A modern, simple gathering panel for WoW: Forever that's part of your world map,
 3. Tick whichever nodes you want to track.
 
 Herbs and ore start hidden and fishing pools start on. Professions your character doesn't have are greyed out; you can unlock them in Settings → Professions.
-
-## Installing by hand
-
-Download the zip from the releases page and extract it into `World of Warcraft\_forever_\Interface\AddOns\`, so you end up with `AddOns\ForeverNodes\ForeverNodes.toc`.
 
 ## Feedback
 
