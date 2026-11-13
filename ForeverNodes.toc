@@ -2,7 +2,7 @@
 ## Title: Forever Nodes
 ## Notes: Simple herb and ore node icons on the minimap and world map. Icons hide once you are close enough for the game's own tracking dots to take over.
 ## Author: Lvcid
-## Version: 1.0.1
+## Version: 1.0.2
 ## IconTexture: Interface\AddOns\ForeverNodes\Icons\icon
 ## SavedVariables: ForeverNodesDB
 ## OptionalDeps: EllesmereUI

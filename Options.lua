@@ -223,18 +223,14 @@ local function IconTab(parent, icon, onClick)
     b:SetSize(46, 44)
     local stock = Stock()
     if stock then
-        -- The game's own action-button glows mark the hovered and the open tab.
-        -- With no plate around it the icon can be larger; the tab keeps its footprint.
-        local hl = b:CreateTexture(nil, "HIGHLIGHT")
-        hl:SetTexture("Interface\\Buttons\\ButtonHilight-Square")
-        hl:SetBlendMode("ADD")
-        hl:SetSize(32, 32)
-        hl:SetPoint("TOP", 0, 1)
-        b.glow = b:CreateTexture(nil, "OVERLAY")
-        b.glow:SetTexture("Interface\\Buttons\\CheckButtonHilight")
-        b.glow:SetBlendMode("ADD")
-        b.glow:SetSize(32, 32)
-        b.glow:SetPoint("TOP", 0, 1)
+        -- No plate around an unselected tab, so the icon can be larger. The open tab
+        -- gets the same rounded gold edge as the lit half of the Lvl / A-Z switch,
+        -- over the whole tab (icon and skill), like the EllesmereUI look's selector.
+        b.bg = Rounded(b, "BACKGROUND", "round_fill")
+        b.edge = Rounded(b, "BORDER", "round_edge")
+        local hl = Rounded(b, "HIGHLIGHT", "round_fill")
+        hl:SetVertexColor(1, 1, 1, 0.08)
+        b.stockPlate = true
     else
         b.bg = Rounded(b, "BACKGROUND", "round_fill")
         b.edge = Rounded(b, "BORDER", "round_edge")
@@ -242,18 +238,21 @@ local function IconTab(parent, icon, onClick)
         hl:SetVertexColor(1, 1, 1, 0.10)
     end
     b.pic = b:CreateTexture(nil, "ARTWORK")
-    b.pic:SetSize(stock and 28 or 20, stock and 28 or 20)
-    b.pic:SetPoint("TOP", 0, stock and -1 or -5)
+    -- Padded inside the tab's edge (the open tab's frame), the skill number underneath.
+    b.pic:SetSize(stock and 24 or 20, stock and 24 or 20)
+    b.pic:SetPoint("TOP", 0, stock and -4 or -5)
     b.pic:SetTexture(icon)
     b.pic:SetTexCoord(0.07, 0.93, 0.07, 0.93)
     b.level = Label(b, "GameFontHighlightSmall") -- the character's skill, under the icon
-    b.level:SetPoint("BOTTOM", 0, stock and 2 or 5)
+    b.level:SetPoint("BOTTOM", 0, stock and 4 or 5)
     b.level:SetText(" ")
     b:SetScript("OnClick", onClick) -- no tooltip: the page title says which tab is open
     function b:SetSelected(isSelected)
         self.isSelected = isSelected
-        if self.glow then
-            self.glow:SetShown(isSelected)
+        if self.stockPlate then
+            -- Only the open tab shows a plate: the switch's lit-half colors.
+            self.bg:SetVertexColor(BRONZE[1], BRONZE[2], BRONZE[3], isSelected and 0.30 or 0)
+            self.edge:SetVertexColor(GOLD[1], GOLD[2], GOLD[3], isSelected and 0.85 or 0)
         elseif isSelected then
             self.bg:SetVertexColor(BRONZE[1], BRONZE[2], BRONZE[3], 0.45)
             self.edge:SetVertexColor(GOLD[1], GOLD[2], GOLD[3], 0.95)
@@ -1377,8 +1376,10 @@ local floating = false -- the floating window has been placed (keeps where the p
 -- bundled and it follows whatever this client draws there.
 
 -- Recreates every visible texture of `source` (and of its direct children) on `target`.
--- Returns how many were placed.
-local function CloneArt(source, target)
+-- Returns how many were placed. `flip` turns the copy upside down (top pieces at the bottom).
+local FLIPPED = { TOP = "BOTTOM", BOTTOM = "TOP", TOPLEFT = "BOTTOMLEFT", BOTTOMLEFT = "TOPLEFT",
+    TOPRIGHT = "BOTTOMRIGHT", BOTTOMRIGHT = "TOPRIGHT" }
+local function CloneArt(source, target, flip)
     local copies, owners = {}, { [source] = true }
     local function CopyRegions(owner)
         for _, region in ipairs({ owner:GetRegions() }) do
@@ -1396,6 +1397,21 @@ local function CloneArt(source, target)
                 copy:SetVertexColor(region:GetVertexColor())
                 copy:SetAlpha(region:GetAlpha())
                 copy:SetBlendMode(region:GetBlendMode())
+                if flip then
+                    -- The same picture, its top and bottom swapped. Pieces that run the
+                    -- full height (the shaded fill, the side edges) are left as they are:
+                    -- flipping the fill moves its lighter end to the top.
+                    local top, bottom = false, false
+                    for i = 1, region:GetNumPoints() do
+                        local point = region:GetPoint(i)
+                        if point and point:find("TOP") then top = true end
+                        if point and point:find("BOTTOM") then bottom = true end
+                    end
+                    if not (top and bottom) then
+                        local ulx, uly, llx, lly, urx, ury, lrx, lry = copy:GetTexCoord()
+                        copy:SetTexCoord(llx, lly, ulx, uly, lrx, lry, urx, ury)
+                    end
+                end
                 copies[region] = copy
             end
         end
@@ -1416,6 +1432,9 @@ local function CloneArt(source, target)
             local point, relative, relativePoint, x, y = region:GetPoint(i)
             local to = (relative == nil or owners[relative]) and target or copies[relative]
             if to then
+                if flip then
+                    point, relativePoint, y = FLIPPED[point] or point, FLIPPED[relativePoint] or relativePoint, -(y or 0)
+                end
                 copy:SetPoint(point, to, relativePoint, x, y)
                 anchored = true
             end
@@ -1428,7 +1447,8 @@ end
 local ornates = {} -- [pane] = the copied border frame, or false when copying was not possible
 
 -- Shows the quest log's border around `pane` (`on`), or the pane's plain inset edge.
-local function UseQuestBorder(pane, on)
+-- `flip`: upside down, for a pane at the top (its crest then points down at the rest).
+local function UseQuestBorder(pane, on, flip)
     if on and ornates[pane] == nil then
         ornates[pane] = false
         local log = WorldMapFrame and WorldMapFrame.QuestLog
@@ -1440,7 +1460,7 @@ local function UseQuestBorder(pane, on)
             made:SetPoint("BOTTOMRIGHT", 3, -4)
             made:SetFrameLevel(pane:GetFrameLevel() + 20)
             made:EnableMouse(false)
-            local ok, placed = pcall(CloneArt, source, made)
+            local ok, placed = pcall(CloneArt, source, made, flip)
             if ok and placed and placed > 0 then ornates[pane] = made else made:Hide() end
         end
     end
@@ -1646,7 +1666,7 @@ local function ApplyLayout()
     end
     frame.shell:SetShown(not merged) -- merged, the map window is the frame
     UseQuestBorder(body, merged and Stock())
-    UseQuestBorder(nav, merged and Stock())
+    UseQuestBorder(nav, merged and Stock(), true) -- the tab row is on top: its crest goes at the bottom
     -- With the ornate border the scroll marker sits outside the box, in the strip
     -- the quest log uses for its scroll bar.
     local thumbOffset = (merged and Stock()) and 24 or 0
