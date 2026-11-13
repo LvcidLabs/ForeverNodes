@@ -2,7 +2,7 @@
 
 # Forever Nodes
 
-A modern, simple gathering panel that's part of your world map, with node toggles only a click away. Comes preloaded with most known herbalism, mining and fishing locations. Made exclusively for WoW: Forever and heavily inspired by GatherMate2.
+A modern, simple gathering panel for WoW: Forever that's part of your world map, with node toggles only a click away. Comes preloaded with most known herbalism, mining and fishing locations. Made exclusively for WoW: Forever and heavily inspired by GatherMate2.
 
 **Download:** [CurseForge](https://www.curseforge.com/wow/addons/forever-nodes) · [GitHub releases](https://github.com/LvcidLabs/ForeverNodes/releases)
 
