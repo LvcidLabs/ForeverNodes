@@ -12,22 +12,20 @@ A modern, simple gathering panel for WoW: Forever that's part of your world map,
 
 <table align="center">
   <tr>
-    <td align="center">
-      <img src="https://github.com/user-attachments/assets/85b2cdde-bf7d-4f43-836d-c24b1ef0a477" alt="The Forever Nodes button on the world map" height="260"><br>
+    <td align="center" valign="top" width="270">
+      <img src="https://github.com/user-attachments/assets/85b2cdde-bf7d-4f43-836d-c24b1ef0a477" alt="The Forever Nodes button on the world map" width="252" height="210"><br>
       <sub>Adds a button to your world map, shares space with quest log.</sub>
     </td>
-    <td align="center">
-      <img src="https://github.com/user-attachments/assets/158dfd14-cf13-4997-9f9c-9a69a5f03a3a" alt="Minimap with node icons and markers" height="260"><br>
+    <td align="center" valign="top" width="230">
+      <img src="https://github.com/user-attachments/assets/158dfd14-cf13-4997-9f9c-9a69a5f03a3a" alt="Minimap with node icons and markers" width="213" height="210"><br>
       <sub>Nearby nodes become customizable dots/circles (dots by default), just like Gatherer or GatherMate2.</sub>
     </td>
-    <td align="center">
-      <img src="https://github.com/user-attachments/assets/07bc9690-1aa8-4c3c-91c8-38134fa8b392" alt="The Settings tab" height="260"><br>
+    <td align="center" valign="top" width="235">
+      <img src="https://github.com/user-attachments/assets/07bc9690-1aa8-4c3c-91c8-38134fa8b392" alt="The Settings tab" width="217" height="210"><br>
       <sub>Easy to access settings right in the panel.</sub>
     </td>
   </tr>
 </table>
-
-
 
 ## Features
 
