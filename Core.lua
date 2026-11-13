@@ -638,7 +638,7 @@ driver:SetScript("OnEvent", function(self, event, arg1)
             end
         end
         FN:SetupButtons()
-        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.1.0"
+        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.1.1"
         -- Gold name, white version, gold author; the hint goes on its own indented line.
         -- The yellow star is the game's own raid target marker, drawn at text height.
         print(("|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t |cffffd100Forever Nodes|r |cffffffffv%s by Lvcid|r"

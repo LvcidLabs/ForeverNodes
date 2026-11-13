@@ -428,6 +428,13 @@ local function SetupSettingsPage()
     local title = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightHuge")
     title:SetPoint("TOPLEFT", 7, -22)
     title:SetText(TITLE)
+    -- Version and author beside the title, smaller and grey, on the same baseline.
+    local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version")
+    -- A step smaller than body text, sitting on the title's baseline, with the version a
+    -- shade dimmer than the author so the two read as separate bits.
+    local byline = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    byline:SetPoint("BOTTOMLEFT", title, "BOTTOMRIGHT", 10, 2)
+    byline:SetText((version and ("|cff6f6f6fv" .. version .. "|r \226\128\148 ") or "") .. "by Lvcid") -- an em dash between
     local divider = page:CreateTexture(nil, "ARTWORK")
     if not pcall(divider.SetAtlas, divider, "Options_HorizontalDivider", true) or not divider:GetAtlas() then
         divider:SetColorTexture(1, 1, 1, 0.12) -- the plain line where the atlas is missing
@@ -443,7 +450,7 @@ local function SetupSettingsPage()
     intro:SetText("All settings are in Forever Nodes' own window.")
     local open = CreateFrame("Button", nil, page, "UIPanelButtonTemplate")
     open:SetSize(180, 26)
-    open:SetPoint("TOPLEFT", intro, "BOTTOMLEFT", 0, -12)
+    open:SetPoint("TOP", intro, "BOTTOM", 0, -34) -- centered under the line above, with room above it
     open:SetText("Open Forever Nodes")
     open:SetScript("OnClick", function()
         if SettingsPanel and SettingsPanel:IsShown() then HideUIPanel(SettingsPanel) end
@@ -459,7 +466,7 @@ local function SetupSettingsPage()
         FN:OpenToSettings()
     end)
     local also = page:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    also:SetPoint("TOPLEFT", openSettings, "BOTTOMLEFT", 0, -18)
+    also:SetPoint("TOPLEFT", intro, "BOTTOMLEFT", 22, -125) -- indented a little, clear of the buttons
     also:SetText("It also opens from:")
     local ways = page:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     ways:SetPoint("TOPLEFT", also, "BOTTOMLEFT", 8, -8)
@@ -525,8 +532,8 @@ local function SetupSettingsPage()
 
     -- Options, under their own heading as on the game's pages.
     local heading = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
-    heading:SetPoint("TOPLEFT", page, "TOPLEFT", 20, TOP - 258) -- under the framed picture
-    heading:SetText("Options")
+    heading:SetPoint("TOPLEFT", page, "TOPLEFT", 20, TOP - 262) -- under the framed picture
+    heading:SetText("Miscellaneous")
 
     local function Tick(text, anchor, y)
         local box = CreateFrame("CheckButton", nil, page, "UICheckButtonTemplate")
