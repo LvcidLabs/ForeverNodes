@@ -448,14 +448,18 @@ gatherEvents:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 gatherEvents:RegisterEvent("LOOT_READY")
 gatherEvents:SetScript("OnEvent", function(_, event, unit, _, spellID)
     local db = FN.db
-    if not (db and db.recordGather) then return end
+    if not db then return end
+    -- Herbs and ore each have their own "record" setting.
+    local function Records(kind)
+        return (kind == "herb" and db.recordHerb) or (kind == "ore" and db.recordOre) or false
+    end
     if event == "LOOT_READY" then
-        if gather and GetTime() - gather.at < GATHER_WINDOW then FinishGather() end
+        if gather and GetTime() - gather.at < GATHER_WINDOW and Records(gather.kind) then FinishGather() end
         return
     end
     if unit ~= "player" then return end
     local kind = GatherKind(spellID)
-    if not kind then return end
+    if not kind or not Records(kind) then return end
     -- The cast's start is when the node is still targeted; its success confirms it.
     if event == "UNIT_SPELLCAST_START" or not gather then StartGather(kind) end
 end)

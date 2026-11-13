@@ -411,12 +411,19 @@ local function Check(parent, text, get, set)
     return c
 end
 
+-- Things that follow the settings sections' width (wider in the docked panel, where the
+-- sections stack in one column): each is a function(width) taking the section width.
+local sectionWidthFollowers = {}
+
 -- `onRelease`: apply the value when the mouse lets go rather than while dragging.
 local function Slider(parent, text, minValue, maxValue, step, fmt, get, set, onRelease)
     local holder = CreateFrame("Frame", nil, parent)
-    holder:SetSize(234, 34) -- fits inside a settings section's border
+    holder:SetSize(234, 34) -- fits inside a settings section's border; see below
+    -- As wide as the inside of a section (16 less than the section: 8 each side).
+    sectionWidthFollowers[#sectionWidthFollowers + 1] = function(width) holder:SetWidth(width - 16) end
     local label = Label(holder, nil, text)
     label:SetPoint("TOPLEFT")
+    holder.label = label
     local value = Label(holder)
     value:SetPoint("TOPRIGHT")
     value:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
@@ -465,12 +472,13 @@ local function Slider(parent, text, minValue, maxValue, step, fmt, get, set, onR
             if v ~= get() then set(v) end
         end)
     end
-    syncers[#syncers + 1] = function()
+    holder.Sync = function()
         syncing = true
         s:SetValue(get())
         value:SetText(fmt:format(get()))
         syncing = false
     end
+    syncers[#syncers + 1] = holder.Sync
     return holder
 end
 
@@ -617,6 +625,7 @@ local function Swatch(parent, text, getColor)
         PickColor(getColor(), function()
             Sync()
             FN:Restyle()
+            if FN.ColorsChanged then FN:ColorsChanged() end -- text shown in a profession's color
         end)
     end)
     syncers[#syncers + 1] = Sync
@@ -688,7 +697,7 @@ local function RefreshNodes()
     local db = FN.db
 
     -- The profession picked in the left list. One this character lacks is only
-    -- opened while "Let me open professions I don't have" is on.
+    -- opened while "Disable professions I don't have" is off.
     local skills = {}
     for _, kind in ipairs(FN.kinds) do skills[kind] = FN:GetSkill(kind) end
     local current = page.kind
@@ -805,7 +814,7 @@ local function BuildNodesPage(page)
     nodesPage.scroll = Scroller(page)
 
     nodesPage.empty = Label(page, "GameFontDisable",
-        "This character has no gathering profession.\n\nTurn on \"Let me open professions I don't have\" under Settings to see every node.")
+        "This character has no gathering profession.\n\nTurn off \"Disable professions I don't have\" under Settings > Professions to see every node.")
     nodesPage.fishNote = Label(page, "GameFontDisableSmall",
         "")
     -- "equipped" is green while a pole is in hand, red otherwise: a quick check that the addon sees it.
@@ -861,13 +870,28 @@ local function Section(column, key, title, height, onToggle)
 
     local sign -- the + / - on the right
     if stock then
-        -- The quest log's brown bar with a thin gold edge, and the game's own +/- buttons.
+        -- The quest log's brown bar with a thin gold edge, and its plain bright-yellow
+        -- + / - (not a round button), as on the quest log's zone headers.
         fill:SetColorTexture(0.20, 0.13, 0.07, 0.85)
         Outline(header, header, 0.55, 0.42, 0.20, 0.55)
         text:SetTextColor(0.85, 0.82, 0.75)
-        sign = header:CreateTexture(nil, "OVERLAY")
-        sign:SetSize(16, 16)
-        sign:SetPoint("RIGHT", -5, 0)
+        -- Hover as on the quest log: the title turns bright white, the bar stays as it is.
+        hover:SetAlpha(0)
+        header:SetScript("OnEnter", function() text:SetTextColor(1, 1, 1) end)
+        header:SetScript("OnLeave", function() text:SetTextColor(0.85, 0.82, 0.75) end)
+        -- The + / - are drawn as solid bars, bold like the quest log's (the font's
+        -- own are thin, and its hyphen shorter than its plus): a crossbar, plus an
+        -- upright for the +.
+        local function Bar(width, height)
+            local t = header:CreateTexture(nil, "OVERLAY")
+            t:SetColorTexture(1, 0.82, 0)
+            t:SetSize(width, height)
+            t:SetPoint("CENTER", header, "RIGHT", -14, 0)
+            return t
+        end
+        section.crossbar = Bar(11, 3)
+        section.upright = Bar(3, 11)
+        sign = header:CreateFontString(nil, "OVERLAY") -- unused in this look; kept so Paint stays simple
     else
         fill:SetColorTexture(1, 1, 1, 0.07)
         sign = Label(header, "GameFontNormalLarge")
@@ -878,6 +902,10 @@ local function Section(column, key, title, height, onToggle)
     local content = CreateFrame("Frame", nil, column)
     content:SetSize(SECTION_WIDTH - 2 * SECTION_INSET, height)
     section.header, section.content = header, content
+    sectionWidthFollowers[#sectionWidthFollowers + 1] = function(width)
+        header:SetWidth(width)
+        content:SetWidth(width - 2 * SECTION_INSET)
+    end
 
     -- A thin border in the header bar's color around an open section's contents,
     -- hanging from the header (which is its top).
@@ -903,8 +931,10 @@ local function Section(column, key, title, height, onToggle)
         local collapsed = self:IsCollapsed()
         content:SetShown(not collapsed)
         box:SetShown(not collapsed)
-        if stock then
-            sign:SetTexture(collapsed and "Interface\\Buttons\\UI-PlusButton-Up" or "Interface\\Buttons\\UI-MinusButton-Up")
+        if self.crossbar then
+            -- Stock: drawn bars; the upright only on the +.
+            self.crossbar:Show()
+            self.upright:SetShown(collapsed)
         else
             sign:SetText(collapsed and "+" or "-")
         end
@@ -979,7 +1009,7 @@ local function BuildSettingsPage(columnA, columnB)
     -- Maps ---------------------------------------------------------------------
     -- The minimap and the world map each have their own settings; the switch picks
     -- which map the controls below are showing and editing.
-    local maps, page = Add(sectionsA, columnA, "maps", "Maps", 164)
+    local maps, page = Add(sectionsA, columnA, "maps", "Maps & Icons", 164)
     local editing = "minimap"
     local function Look() return db.icons[editing] end
     local function LookNumber(key)
@@ -1026,6 +1056,22 @@ local function BuildSettingsPage(columnA, columnB)
     end
     local detected = Label(page, "GameFontDisableSmall", "")
     local edge = Slider(page, "Draw range", 50, 125, 1, "%d%%", Number("minimapEdge"))
+    -- The minimap-only part: a line across the section in its border's color, and under it
+    -- "Advanced", which opens and closes the controls below it (closed by default).
+    local miniLine = Stock() and Fill(page, "ARTWORK", 0.20, 0.13, 0.07, 0.85) or Fill(page, "ARTWORK", 1, 1, 1, 0.10)
+    miniLine:SetHeight(1)
+    local advanced = CreateFrame("Button", nil, page)
+    advanced:SetSize(220, 20) -- the clickable area covers the whole label
+    local advancedText = Label(advanced, "GameFontDisable", "Advanced Minimap Settings") -- grey; gold on hover
+    advancedText:SetPoint("CENTER")
+    advanced:SetScript("OnEnter", function() advancedText:SetTextColor(GOLD[1], GOLD[2], GOLD[3]) end)
+    advanced:SetScript("OnLeave", function() advancedText:SetTextColor(0.5, 0.5, 0.5) end)
+    -- `page` is reused for the sections that follow; the layout below needs this one.
+    local iconsPage = page
+    -- Open or not is not saved: Advanced starts closed every time the Icons section
+    -- (or the window) is shown again, and after a reload.
+    local advancedOpen = false
+    db.advancedOpen = nil -- briefly saved by an earlier version; no longer used
 
     -- Lays out what the chosen map shows: no empty space for hidden controls.
     local function LayoutMaps()
@@ -1037,25 +1083,49 @@ local function BuildSettingsPage(columnA, columnB)
             y = y + 44
         end
         local mini = editing == "minimap"
-        shapeLabel:SetShown(mini)
-        detected:SetShown(mini)
-        edge:SetShown(mini)
-        for choice, card in pairs(shapeCards) do
-            card:SetShown(mini)
-            card:SetSelected(db.minimapShape == choice)
-            card:SetPoint("TOPLEFT", card.offset, -y)
-        end
+        local open = mini and advancedOpen
+        miniLine:SetShown(mini)
+        advanced:SetShown(mini)
+        shapeLabel:SetShown(open)
+        detected:SetShown(open)
+        edge:SetShown(open)
+        for _, card in pairs(shapeCards) do card:SetShown(open) end
         if mini then
+            -- The line runs border to border (the contents are inset from the section's edge).
+            miniLine:ClearAllPoints()
+            miniLine:SetPoint("TOPLEFT", iconsPage, "TOPLEFT", -SECTION_INSET, -(y - 2))
+            miniLine:SetPoint("TOPRIGHT", iconsPage, "TOPRIGHT", SECTION_INSET, -(y - 2))
+            advanced:SetPoint("TOP", iconsPage, "TOP", 0, -(y + 3)) -- centered across, and level between the line and the border
+            y = y + (open and 32 or 30)
+        end
+        if open then
+            -- Draw range first, then the shape.
+            edge:SetPoint("TOPLEFT", 0, -y)
+            y = y + 44
+            for choice, card in pairs(shapeCards) do
+                card:SetSelected(db.minimapShape == choice)
+                card:SetPoint("TOPLEFT", card.offset, -y)
+            end
             shapeLabel:SetPoint("TOPLEFT", 0, -(y + 5))
             local name = FN:DetectedMinimapShape()
             detected:SetText("Detected: " .. (name == "ROUND" and "round" or name == "SQUARE" and "square" or name:lower()))
             detected:SetPoint("TOPLEFT", shapeCards.auto, "BOTTOMLEFT", 0, -4)
             y = y + 46
-            edge:SetPoint("TOPLEFT", 0, -y)
-            y = y + 44
         end
         maps.height = y - 10
     end
+    advanced:SetScript("OnClick", function()
+        advancedOpen = not advancedOpen
+        LayoutMaps()
+        Relayout(true)
+    end)
+    -- Hidden (the Icons section closed, or the window or panel closed): close it again.
+    iconsPage:HookScript("OnHide", function()
+        if advancedOpen then
+            advancedOpen = false
+            LayoutMaps()
+        end
+    end)
     Check(page, "Circular Icons (crop to look cleaner)",
         function() return Look().round end,
         function(v)
@@ -1068,12 +1138,21 @@ local function BuildSettingsPage(columnA, columnB)
     Slider(page, "Icon size", 8, 32, 1, "%d", LookNumber("size")):SetPoint("TOPLEFT", 0, -84)
 
     -- Colors -------------------------------------------------------------------
-    _, page = Add(sectionsA, columnA, "colors", "Colors", 42)
+    -- Professions: each one's color, and whether ones the character lacks can be opened.
+    _, page = Add(sectionsA, columnA, "colors", "Professions", 70)
     local note = Label(page, "GameFontDisableSmall", "Shared by the circle and the dot.")
     note:SetPoint("TOPLEFT", 0, 0)
     Swatch(page, "Herbs", function() return db.colors.herb end):SetPoint("TOPLEFT", 0, -20)
     Swatch(page, "Mining", function() return db.colors.ore end):SetPoint("TOPLEFT", 78, -20)
     Swatch(page, "Fishing", function() return db.colors.fish end):SetPoint("TOPLEFT", 156, -20)
+    -- Professions the character lacks are always listed, greyed out; ticked (the default)
+    -- they cannot be opened. The saved setting is the other way round (showAll).
+    Check(page, "Disable professions I don't have",
+        function() return not db.showAll end,
+        function(v)
+            db.showAll = not v
+            FN:RefreshOptions()
+        end):SetPoint("TOPLEFT", 0, -50)
 
     -- Nearby nodes -------------------------------------------------------------
     local GROUP_TOP, CIRCLE_HEIGHT, DOT_HEIGHT, RING_HEIGHT = 86, 156, 152, 122
@@ -1126,6 +1205,7 @@ local function BuildSettingsPage(columnA, columnB)
         styleCards[style] = card
         local group = CreateFrame("Frame", nil, page)
         group:SetSize(SECTION_WIDTH, CIRCLE_HEIGHT)
+        sectionWidthFollowers[#sectionWidthFollowers + 1] = function(width) group:SetWidth(width - 2 * SECTION_INSET) end
         group:SetPoint("TOPLEFT", 0, -GROUP_TOP)
         groups[style] = group
     end
@@ -1145,12 +1225,13 @@ local function BuildSettingsPage(columnA, columnB)
     local separator = Stock() and Fill(dot, "ARTWORK", 0.20, 0.13, 0.07, 0.85) or Fill(dot, "ARTWORK", 1, 1, 1, 0.10)
     separator:SetHeight(1)
     separator:SetPoint("TOPLEFT", -SECTION_INSET, -120)
-    separator:SetPoint("TOPRIGHT", dot, "TOPLEFT", SECTION_WIDTH - SECTION_INSET, -120)
+    separator:SetPoint("TOPRIGHT", dot, "TOPRIGHT", SECTION_INSET, -120)
 
     -- The dot's optional second border: a thin ring around it. Its own controls
     -- show only while it is on.
     local ring = CreateFrame("Frame", nil, dot)
     ring:SetSize(SECTION_WIDTH, RING_HEIGHT)
+    sectionWidthFollowers[#sectionWidthFollowers + 1] = function(width) ring:SetWidth(width - 2 * SECTION_INSET) end
     ring:SetPoint("TOPLEFT", 0, -162)
     Slider(ring, "Ring size", 4, 30, 1, "%d", Number("dotRingSize")):SetPoint("TOPLEFT", 0, 0)
     Slider(ring, "Ring width", 0.5, 4, 0.5, "%.1f", Number("dotRingWidth")):SetPoint("TOPLEFT", 0, -44)
@@ -1177,28 +1258,65 @@ local function BuildSettingsPage(columnA, columnB)
     syncers[#syncers + 1] = ShowStyle
 
     -- Node lists ---------------------------------------------------------------
-    _, page = Add(sectionsB, columnB, "lists", "Node lists", 68)
-    -- Professions the character lacks are always listed, greyed out; this lets them be opened.
-    Check(page, "Let me open professions I don't have", Bool("showAll", function()
-        FN:RefreshOptions()
-    end)):SetPoint("TOPLEFT", 0, 0)
-    -- Saves where a pool was when loot comes out of it; new pool types join the Fishing list unticked.
-    Check(page, "Record fishing pools I fish from", Bool("record", function() end)):SetPoint("TOPLEFT", 0, -24)
-    -- Saves where a herb or vein was when it is gathered; new types join their list unticked.
-    Check(page, "Record herbs and ore I gather", Bool("recordGather", function() end)):SetPoint("TOPLEFT", 0, -48)
+    _, page = Add(sectionsB, columnB, "lists", "Discovery", 68)
+    -- Recording, one setting per profession. Each saves where a node was found (a herb
+    -- or vein when it is gathered, a pool when loot comes out of it); new types join
+    -- their list unticked. The profession's word is in that profession's own color
+    -- (Colors section), and follows it when it changes.
+    local recordLabels = {}
+    local function Hex(kind)
+        local c = db.colors[kind]
+        local function Byte(v) return math.floor((v or 1) * 255 + 0.5) end
+        return ("%02x%02x%02x"):format(Byte(c[1]), Byte(c[2]), Byte(c[3]))
+    end
+    for i, rec in ipairs({
+        { key = "recordHerb", kind = "herb", before = "Record new ", word = "herb", after = " locations" },
+        { key = "recordOre", kind = "ore", before = "Record new ", word = "mining", after = " locations" },
+        { key = "record", kind = "fish", before = "Record new ", word = "fishing", after = " spots" },
+    }) do
+        local box = Check(page, rec.before .. rec.word .. rec.after, Bool(rec.key, function() end))
+        box:SetPoint("TOPLEFT", 0, -24 * (i - 1))
+        local function Paint()
+            box:SetLabel(rec.before .. "|cff" .. Hex(rec.kind) .. rec.word .. "|r" .. rec.after)
+        end
+        syncers[#syncers + 1] = Paint
+        recordLabels[#recordLabels + 1] = Paint
+    end
+    -- While a color is being picked, the words follow it straight away.
+    function FN:ColorsChanged()
+        for i = 1, #recordLabels do recordLabels[i]() end
+    end
 
     -- Window -------------------------------------------------------------------
-    _, page = Add(sectionsB, columnB, "window", "Window", 64)
-    Slider(page, "Scale", 0.7, 1.5, 0.05, "%.2fx",
-        function() return db.scale end,
+    _, page = Add(sectionsB, columnB, "window", "Window", 88)
+    -- The floating window and the docked panel each keep their own scale (scale and
+    -- dockScale), so a size chosen for one never carries into the other.
+    local function ScaleKey() return (frame and frame.docked) and "dockScale" or "scale" end
+    local scale = Slider(page, "Scale", 0.7, 1.5, 0.05, "%.2fx",
+        function() return db[ScaleKey()] end,
         function(v)
-            db.scale = v
+            db[ScaleKey()] = v
             frame:SetScale(v)
             FN:UpdateDock()
-        end, true):SetPoint("TOPLEFT", 0, 0)
+        end, true)
+    scale:SetPoint("TOPLEFT", 0, -54) -- last, under the two tick boxes
+    -- Docked, scaling the panel's contents can spill them past the panel: flagged there
+    -- with a small red tag beside the label, on the same baseline.
+    local experimental = Label(scale, "GameFontNormalSmall", "EXPERIMENTAL")
+    experimental:SetTextColor(1, 0.25, 0.25)
+    local font, size, flags = experimental:GetFont()
+    if font and size then experimental:SetFont(font, math.max(size - 2, 8), flags) end -- a step smaller than the label
+    experimental:SetPoint("BOTTOMLEFT", scale.label, "BOTTOMRIGHT", 6, 0)
+    sectionWidthFollowers[#sectionWidthFollowers + 1] = function()
+        experimental:SetShown(frame and frame.docked or false)
+        scale.Sync() -- the value of the mode now showing
+    end
     Check(page, "Dock to the world map (map button)", Bool("dock", function()
         FN:DockSettingChanged()
-    end)):SetPoint("TOPLEFT", 0, -44)
+    end)):SetPoint("TOPLEFT", 0, -24)
+    Check(page, "Show the minimap button",
+        function() return FN:MinimapButtonShown() end,
+        function(v) FN:SetMinimapButtonShown(v and true or false) end):SetPoint("TOPLEFT", 0, 0)
 
     -- Last of all on every sync: stack the sections at their current sizes.
     syncers[#syncers + 1] = function() Relayout(false) end
@@ -1623,6 +1741,7 @@ end
 local function ApplyLayout()
     local docked = ShouldDock()
     frame.docked = docked
+    frame:SetScale(docked and FN.db.dockScale or FN.db.scale) -- each mode has its own scale
     -- Esc closes the floating window. The side panel instead follows the map, so
     -- that closing the map with Esc does not count as closing the panel.
     SetEscCloses(not docked)
@@ -1761,6 +1880,11 @@ local function ApplyLayout()
 
     -- Settings: two blocks side by side, or stacked (and scrolling) in the side panel.
     local pageWidth = frame.pageWidth
+    -- Stacked in the side panel, the sections run the panel's full width; side by side
+    -- in the window they keep their fixed width.
+    -- (pageWidth + 1 leaves the same margin on the right as the panel leaves on the left.)
+    local sectionWidth = docked and math.floor(pageWidth + 1) or SECTION_WIDTH
+    for i = 1, #sectionWidthFollowers do sectionWidthFollowers[i](sectionWidth) end
     columnB:ClearAllPoints()
     if docked then
         -- Each block's height already ends with one section gap, so the second
@@ -2075,6 +2199,19 @@ function FN:OpenFromCommand()
         return
     end
     OpenPanel()
+end
+
+-- Opens Forever Nodes (docked or floating, as set) with its Settings page showing.
+-- Already open: just switches to Settings rather than closing it.
+function FN:OpenToSettings()
+    selected = SETTINGS -- the layout keeps this selection when the window first shows
+    if frame and frame:IsShown() then
+        ShowPage(SETTINGS)
+        frame:Raise()
+        return
+    end
+    FN:OpenFromCommand()
+    if frame and frame:IsShown() then ShowPage(SETTINGS) end
 end
 
 -- The world map button: the side panel, swapping places with the quest log.

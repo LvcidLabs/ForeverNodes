@@ -148,9 +148,7 @@ local function SetupWorldMapButton()
     btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     btn:SetScript("OnClick", function(self, button)
         if button == "RightButton" then
-            FN.db.worldmap = not FN.db.worldmap
-            FN:Refresh()
-            if FN.RefreshOptions then FN:RefreshOptions() end -- the "Show on world map" tick box
+            FN:ToggleWorldMapIcons()
             ShowTip(self) -- same tooltip, new state
         else
             FN:ToggleMapPanel()
@@ -339,7 +337,241 @@ local function SetupWorldMapButton()
     map:HookScript("OnShow", Place)
 end
 
+-- Right click on either button: world map icons on or off.
+function FN:ToggleWorldMapIcons()
+    FN.db.worldmap = not FN.db.worldmap
+    FN:Refresh()
+    if FN.RefreshOptions then FN:RefreshOptions() end -- the "Show on world map" tick box
+end
+
+-- Minimap button -------------------------------------------------------------------
+-- Made with LibDBIcon, so minimap addons (EllesmereUI's button drawer among them)
+-- treat it like every other addon's button. Its position and whether it shows are
+-- kept in the saved settings (db.minimapIcon, the library's own format).
+
+local function SetupMinimapButton()
+    local ldb = LibStub("LibDataBroker-1.1", true)
+    local dbicon = LibStub("LibDBIcon-1.0", true)
+    if not (ldb and dbicon) then return end
+    local db = FN.db
+    if type(db.minimapIcon) ~= "table" then db.minimapIcon = { hide = false } end
+
+    local broker
+    local function FillTooltip(tooltip)
+        tooltip:AddLine(TITLE)
+        tooltip:AddLine("Left click: settings", 1, 1, 1)
+        tooltip:AddLine("Right click: map icons " .. (db.worldmap and "|cff33ff33ON|r" or "|cffff4040OFF|r"), 1, 1, 1)
+    end
+    broker = ldb:NewDataObject(ADDON, {
+        type = "launcher",
+        text = TITLE,
+        icon = FN.MEDIA .. "icon",
+        OnClick = function(self, button)
+            if button == "RightButton" then
+                FN:ToggleWorldMapIcons()
+                -- The library fills the tooltip only when the mouse enters; refill it
+                -- in place so it shows the new state.
+                local tooltip = dbicon.tooltip
+                if tooltip and tooltip:IsShown() and tooltip:IsOwned(self) then
+                    tooltip:ClearLines()
+                    FillTooltip(tooltip)
+                    tooltip:Show()
+                end
+            else
+                FN:OpenFromCommand()
+            end
+        end,
+        OnTooltipShow = FillTooltip,
+    })
+    dbicon:Register(ADDON, broker, db.minimapIcon)
+
+    -- The icon's own gold rim is the button's border: the library's ring and dark
+    -- backing are hidden, and the icon is sized to where that ring was drawn
+    -- (26 across, centered), so it sits among the other minimap buttons the same way.
+    local button = dbicon:GetMinimapButton(ADDON)
+    if button and button.icon then
+        for _, region in ipairs({ button:GetRegions() }) do
+            if region ~= button.icon and region:IsObjectType("Texture") then
+                local layer = region:GetDrawLayer()
+                if layer == "OVERLAY" or layer == "BACKGROUND" then region:Hide() end
+            end
+        end
+        button.icon:ClearAllPoints()
+        button.icon:SetPoint("CENTER", button, "CENTER")
+        button.icon:SetSize(26, 26)
+        -- The whole picture always (the library otherwise trims its edges, which would cut the rim).
+        button.icon.UpdateCoord = function(icon) icon:SetTexCoord(0, 1, 0, 1) end
+        button.icon:UpdateCoord()
+    end
+end
+
+function FN:MinimapButtonShown()
+    return not (FN.db.minimapIcon and FN.db.minimapIcon.hide)
+end
+
+function FN:SetMinimapButtonShown(show)
+    local dbicon = LibStub("LibDBIcon-1.0", true)
+    if type(FN.db.minimapIcon) ~= "table" then FN.db.minimapIcon = {} end
+    FN.db.minimapIcon.hide = not show
+    if not dbicon then return end
+    if show then dbicon:Show(ADDON) else dbicon:Hide(ADDON) end
+end
+
+-- Options > AddOns page --------------------------------------------------------------
+-- The settings live in Forever Nodes' own window; this page says so and opens it.
+
+local function SetupSettingsPage()
+    if not (Settings and Settings.RegisterCanvasLayoutCategory) then return end
+    -- Laid out like the game's own addon pages: a large white title, the divider under
+    -- it, then the contents indented, in the normal-size fonts those pages use.
+    local page = CreateFrame("Frame")
+    local title = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightHuge")
+    title:SetPoint("TOPLEFT", 7, -22)
+    title:SetText(TITLE)
+    local divider = page:CreateTexture(nil, "ARTWORK")
+    if not pcall(divider.SetAtlas, divider, "Options_HorizontalDivider", true) or not divider:GetAtlas() then
+        divider:SetColorTexture(1, 1, 1, 0.12) -- the plain line where the atlas is missing
+    end
+    divider:SetHeight(1)
+    divider:SetPoint("TOPLEFT", 0, -50)
+    divider:SetPoint("TOPRIGHT", -18, -50)
+    -- Left: what this page is for and how to open the window. Right: where the
+    -- world map button is, as a picture.
+    local LEFT, TOP = 27, -72
+    local intro = page:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    intro:SetPoint("TOPLEFT", LEFT, TOP - 10) -- a little below the frame's top, so the block sits centered beside it
+    intro:SetText("All settings are in Forever Nodes' own window.")
+    local open = CreateFrame("Button", nil, page, "UIPanelButtonTemplate")
+    open:SetSize(180, 26)
+    open:SetPoint("TOPLEFT", intro, "BOTTOMLEFT", 0, -12)
+    open:SetText("Open Forever Nodes")
+    open:SetScript("OnClick", function()
+        if SettingsPanel and SettingsPanel:IsShown() then HideUIPanel(SettingsPanel) end
+        FN:OpenFromCommand()
+    end)
+    -- Straight to the window's Settings page.
+    local openSettings = CreateFrame("Button", nil, page, "UIPanelButtonTemplate")
+    openSettings:SetSize(180, 26)
+    openSettings:SetPoint("TOPLEFT", open, "BOTTOMLEFT", 0, -6)
+    openSettings:SetText("Show Settings")
+    openSettings:SetScript("OnClick", function()
+        if SettingsPanel and SettingsPanel:IsShown() then HideUIPanel(SettingsPanel) end
+        FN:OpenToSettings()
+    end)
+    local also = page:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    also:SetPoint("TOPLEFT", openSettings, "BOTTOMLEFT", 0, -18)
+    also:SetText("It also opens from:")
+    local ways = page:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    ways:SetPoint("TOPLEFT", also, "BOTTOMLEFT", 8, -8)
+    ways:SetJustifyH("LEFT")
+    ways:SetSpacing(5)
+    ways:SetText("-  the world map button (pictured)\n-  the minimap button\n-  typing |cffffd100/fn|r")
+
+    -- One picture per look (EllesmereUI or stock), with everything in it: the map's
+    -- bottom-right corner with a soft spotlight on the button, a caption, what its
+    -- two mouse buttons do, and a thin gold line from the button to those directions.
+    -- Picked each time the page is shown, as the look can change.
+    local PICTURES = {
+        eui = { file = "where_eui", w = 349, h = 292 },   -- pixels used in a 512 x 512 image
+        stock = { file = "where_stock", w = 353, h = 292 },
+    }
+    local SCALE = 0.837 -- screenshot pixels to page units, so the text in it matches the page's
+    -- The picture sits on its own layer inside the frame below, so it always draws on top of the frame's fill.
+    local art = CreateFrame("Frame", nil, page)
+    art:SetPoint("TOPLEFT", page, "TOPLEFT", 335, TOP - 1) -- the frame top lines up with the first line of text
+    art:SetSize(1, 1)
+    local picture
+
+    -- A frame around the whole graphic (map, caption and mouse rows), 8 units clear of
+    -- what the picture shows (it starts 4 in and 9 down, and ends at 286 x 238).
+    local box = CreateFrame("Frame", nil, page)
+    box:SetPoint("TOPLEFT", art, "TOPLEFT", -4, -1)
+    box:SetPoint("BOTTOMRIGHT", art, "TOPLEFT", 294, -243)
+    art:SetParent(box) -- a child of the frame, so drawn above it
+    picture = art:CreateTexture(nil, "ARTWORK")
+    picture:SetPoint("TOPLEFT", art, "TOPLEFT")
+    local boxFill = box:CreateTexture(nil, "BACKGROUND")
+    boxFill:SetAllPoints()
+    local boxEdges = {}
+    for _, edge in ipairs({
+        { "TOPLEFT", "TOPRIGHT", false }, { "BOTTOMLEFT", "BOTTOMRIGHT", false },
+        { "TOPLEFT", "BOTTOMLEFT", true }, { "TOPRIGHT", "BOTTOMRIGHT", true },
+    }) do
+        local t = box:CreateTexture(nil, "BORDER")
+        t:SetPoint(edge[1])
+        t:SetPoint(edge[2])
+        if edge[3] then t:SetWidth(1) else t:SetHeight(1) end
+        boxEdges[#boxEdges + 1] = t
+    end
+
+    local function ShowPicture()
+        local eui = FN.UsesEllesmereLook and FN:UsesEllesmereLook()
+        local look = PICTURES[eui and "eui" or "stock"]
+        picture:SetTexture(FN.MEDIA .. look.file)
+        picture:SetTexCoord(0, look.w / 512, 0, look.h / 512)
+        picture:SetSize(math.floor(look.w * SCALE + 0.5), math.floor(look.h * SCALE + 0.5))
+        -- EllesmereUI: a faint dark panel with a thin light edge. Stock: a dark panel
+        -- with the muted gold edge of the game's own frames.
+        if eui then
+            boxFill:SetColorTexture(0, 0, 0, 0.25)
+            for _, t in ipairs(boxEdges) do t:SetColorTexture(1, 1, 1, 0.14) end
+        else
+            boxFill:SetColorTexture(0, 0, 0, 0.30)
+            for _, t in ipairs(boxEdges) do t:SetColorTexture(0.77, 0.59, 0.28, 0.75) end
+        end
+    end
+    ShowPicture()
+    page:HookScript("OnShow", ShowPicture)
+
+    -- Options, under their own heading as on the game's pages.
+    local heading = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+    heading:SetPoint("TOPLEFT", page, "TOPLEFT", 20, TOP - 258) -- under the framed picture
+    heading:SetText("Options")
+
+    local function Tick(text, anchor, y)
+        local box = CreateFrame("CheckButton", nil, page, "UICheckButtonTemplate")
+        box:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, y)
+        local label = box.Text or box.text
+        if label then
+            label:SetFontObject("GameFontNormal") -- the size the game's own pages use for options
+            label:SetText(text)
+        end
+        return box
+    end
+
+    local mini = Tick("Show the minimap button", heading, -10)
+    mini:ClearAllPoints()
+    mini:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", LEFT - 20 - 4, -10)
+    mini:SetScript("OnShow", function(self) self:SetChecked(FN:MinimapButtonShown()) end)
+    mini:SetScript("OnClick", function(self)
+        FN:SetMinimapButtonShown(self:GetChecked() and true or false)
+        if FN.RefreshOptions then FN:RefreshOptions() end
+    end)
+
+    -- A way out if another addon's map makes docking impossible: the floating window.
+    -- The opposite of "Dock to the world map" in the window (the same saved setting).
+    local float = Tick("Use a floating window instead of docking", mini, -4)
+    float:SetScript("OnShow", function(self) self:SetChecked(not FN.db.dock) end)
+    float:SetScript("OnClick", function(self)
+        FN.db.dock = not self:GetChecked()
+        FN:DockSettingChanged()
+        if FN.RefreshOptions then FN:RefreshOptions() end
+    end)
+    local floatNote = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    floatNote:SetPoint("TOPLEFT", float, "BOTTOMLEFT", 30, 2)
+    floatNote:SetJustifyH("LEFT")
+    floatNote:SetSpacing(3)
+    floatNote:SetText("Recommended: |cffff4040Disabled|r\n"
+        .. "Only enable if another addon stops the docked window from showing correctly.")
+
+    -- Plain: the list turns the selected entry white, which it cannot do to colored letters.
+    local category = Settings.RegisterCanvasLayoutCategory(page, TITLE)
+    Settings.RegisterAddOnCategory(category)
+end
+
 function FN:SetupButtons()
     SetupWorldMapButton()
     FN:SetupMapPanel()
+    SetupMinimapButton()
+    SetupSettingsPage()
 end

@@ -62,9 +62,11 @@ FN.defaults = {
     dotRingColor = { 0, 0, 0, 0.345 }, -- black, about a third opaque
     showAll = false, -- professions the character lacks can be opened (they are always listed, greyed)
     record = true,   -- save the spot of fishing pools the character fishes from
-    recordGather = true, -- save the spot of herbs and ore the character gathers
+    recordHerb = true, -- save the spot of herbs the character gathers
+    recordOre = true,  -- save the spot of veins the character mines
     sort = "level",  -- "level" or "name"
-    scale = 1,       -- options window scale
+    scale = 1,       -- floating options window scale
+    dockScale = 1,   -- docked panel scale (its own, so the two never mix)
     dock = true,     -- the world map button opens the options as a side panel in the quest log's place
     colors = {
         herb = { 0.435, 0.796, 0.161 }, -- lime
@@ -527,6 +529,12 @@ local function InitDB()
         end
     end
 
+    -- Herbs and ore were recorded under one setting before; each now has its own.
+    if type(db.recordGather) == "boolean" then
+        if db.recordHerb == nil then db.recordHerb = db.recordGather end
+        if db.recordOre == nil then db.recordOre = db.recordGather end
+        db.recordGather = nil
+    end
     for key, value in pairs(FN.defaults) do
         if key ~= "colors" and key ~= "icons" and type(db[key]) ~= type(value) then
             db[key] = type(value) == "table" and { value[1], value[2], value[3], value[4] } or value
@@ -630,7 +638,7 @@ driver:SetScript("OnEvent", function(self, event, arg1)
             end
         end
         FN:SetupButtons()
-        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.0.2"
+        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.1.0"
         -- Gold name, white version, gold author; the hint goes on its own indented line.
         -- The yellow star is the game's own raid target marker, drawn at text height.
         print(("|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t |cffffd100Forever Nodes|r |cffffffffv%s by Lvcid|r"
