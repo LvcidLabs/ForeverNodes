@@ -33,6 +33,14 @@ A modern, simple gathering panel for WoW: Forever that's part of your world map,
 
 **Manually:** download the zip from the [releases page](https://github.com/LvcidLabs/ForeverNodes/releases) and extract it into `World of Warcraft\_forever_\Interface\AddOns\`, so you end up with `AddOns\ForeverNodes\ForeverNodes.toc`.
 
+## Getting started
+
+1. Open your world map.
+2. Click the **Forever Nodes** button in the bottom-right corner (or use the minimap button, or type `/fn`).
+3. Tick whichever nodes you want to track.
+
+Herbs and ore start hidden and fishing pools start on. Professions your character doesn't have are greyed out; you can unlock them in Settings → Professions.
+
 ## Features
 
 - **Preloaded node locations** for herbalism, mining and fishing pools across Azeroth, ready the moment you install. No additional data imports necessary
@@ -53,14 +61,6 @@ A modern, simple gathering panel for WoW: Forever that's part of your world map,
 - **Smart recording:** herbs and veins are never mistaken for fishing pools, even if you pick one right after casting, and spots you've already found aren't saved twice
 - **Separate scales** for the docked and floating panel, so each can be sized to fit
 - **Lightweight:** icons are reused rather than recreated, and only nodes near you are checked as you move, so it stays smooth even with every node type enabled
-
-## Getting started
-
-1. Open your world map.
-2. Click the **Forever Nodes** button in the bottom-right corner (or use the minimap button, or type `/fn`).
-3. Tick whichever nodes you want to track.
-
-Herbs and ore start hidden and fishing pools start on. Professions your character doesn't have are greyed out; you can unlock them in Settings → Professions.
 
 ## Feedback
 
