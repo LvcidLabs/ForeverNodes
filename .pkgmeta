@@ -1,0 +1,7 @@
+# What the CurseForge packager puts in the release zip.
+# Tools (the merge tool) is for the author, not for players.
+package-as: ForeverNodes
+
+ignore:
+  - Tools
+  - .github

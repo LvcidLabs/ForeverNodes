@@ -1,11 +1,12 @@
 ## Interface: 16001
 ## Title: Forever N|cffffd928o|cffffe050d|cffffe878e|cfffff0a0s|r
-## Notes: Simple herb and ore node icons on the minimap and world map. Icons hide once you are close enough for the game's own tracking dots to take over.
+## Notes: Herb, ore and fishing pool locations on the minimap and world map, with a settings panel docked to the world map.
 ## Author: Lvcid
 ## Version: 1.1.1
 ## IconTexture: Interface\AddOns\ForeverNodes\Icons\icon
 ## SavedVariables: ForeverNodesDB
 ## OptionalDeps: EllesmereUI
+## X-Curse-Project-ID: 1802563
 
 Libs\LibStub\LibStub.lua
 Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
