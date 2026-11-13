@@ -1,0 +1,19 @@
+## Interface: 16001
+## Title: Forever Nodes
+## Notes: Simple herb and ore node icons on the minimap and world map. Icons hide once you are close enough for the game's own tracking dots to take over.
+## Author: Lvcid
+## Version: 1.0.1
+## IconTexture: Interface\AddOns\ForeverNodes\Icons\icon
+## SavedVariables: ForeverNodesDB
+## OptionalDeps: EllesmereUI
+
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\HereBeDragons\HereBeDragons-2.0.lua
+Libs\HereBeDragons\HereBeDragons-Pins-2.0.lua
+
+Data.lua
+Core.lua
+Record.lua
+Options.lua
+Buttons.lua

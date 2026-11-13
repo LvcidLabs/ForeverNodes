@@ -1,0 +1,4 @@
+# Leftovers from the merge tool and Python
+Data.lua.bak
+__pycache__/
+*.pyc
