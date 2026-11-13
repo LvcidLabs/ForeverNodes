@@ -40,4 +40,4 @@ Node data and icons are based on GatherLite by Wuild (MIT). Inspired by GatherMa
 
 ## License
 
-[MIT](LICENSE) © Lvcid
+[MIT](LICENSE) © Lvcid. The bundled libraries in `Libs` keep their own licenses, and the node data and icons based on GatherLite keep its MIT notice (see [CREDITS.txt](CREDITS.txt)).
