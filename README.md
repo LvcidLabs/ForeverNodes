@@ -63,7 +63,6 @@ Herbs and ore start hidden and fishing pools start on. Your ticks are saved per 
 - **No tooltips on minimap icons:** they intentionally ignore the mouse, so hovering the minimap shows what's actually there (the real herb, vein or pool) instead of a map icon getting in the way
 - **One-click icon toggle:** right click the world map button (or the minimap button) to hide or show map icons instantly, without opening anything
 - **Uncluttered list:** nodes for professions you don't have are greyed out, so the ones you can gather stand out
-- **Smart recording:** herbs and veins are never mistaken for fishing pools, even if you pick one right after casting, and spots you've already found aren't saved twice
 - **Per-character node lists:** each character keeps its own ticked herbs, veins and pools, so a low-level alt and your main can track different things. Everything else (looks, colors, recorded spots, window) is shared across your account
 - **Separate scales** for the docked and floating panel, so each can be sized to fit
 - **Lightweight:** icons are reused rather than recreated, and only nodes near you are checked as you move, so it stays smooth even with every node type enabled
