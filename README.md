@@ -31,6 +31,8 @@ A modern, simple gathering panel for WoW: Forever that's part of your world map,
 
 **Manually:** download the zip from the [releases page](https://github.com/LvcidLabs/ForeverNodes/releases) and extract it into `World of Warcraft\_forever_\Interface\AddOns\`, so you end up with `AddOns\ForeverNodes\ForeverNodes.toc`.
 
+<br>
+
 ## Getting started
 
 1. Open your world map.
@@ -38,6 +40,8 @@ A modern, simple gathering panel for WoW: Forever that's part of your world map,
 3. Tick whichever nodes you want to track.
 
 Herbs and ore start hidden and fishing pools start on. Professions your character doesn't have are greyed out; you can unlock them in Settings → Professions.
+
+<br>
 
 ## Features
 
@@ -51,6 +55,8 @@ Herbs and ore start hidden and fishing pools start on. Professions your characte
 - **Minimap button:** left click opens the panel, right click toggles world map icons
 - **Fits your UI:** currently supports a native theme and an auto-detected EllesmereUI theme
 
+<br>
+
 ## Quality of life
 
 - **No tooltips on minimap icons:** they intentionally ignore the mouse, so hovering the minimap shows what's actually there (the real herb, vein or pool) instead of a map icon getting in the way
@@ -60,13 +66,19 @@ Herbs and ore start hidden and fishing pools start on. Professions your characte
 - **Separate scales** for the docked and floating panel, so each can be sized to fit
 - **Lightweight:** icons are reused rather than recreated, and only nodes near you are checked as you move, so it stays smooth even with every node type enabled
 
+<br>
+
 ## Feedback
 
 Found a node that's missing or in the wrong place? Open an [issue](https://github.com/LvcidLabs/ForeverNodes/issues) or leave a comment on CurseForge with the zone and coordinates.
 
+<br>
+
 ## Credits
 
 Node data and icons are based on GatherLite by Wuild (MIT). Inspired by GatherMate2. Uses HereBeDragons, LibStub, CallbackHandler, LibDataBroker and LibDBIcon. See [CREDITS.txt](CREDITS.txt).
+
+<br>
 
 ## License
 
