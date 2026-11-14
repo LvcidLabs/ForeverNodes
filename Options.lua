@@ -2294,7 +2294,12 @@ local function BuildSettingsPage(columnA, columnB)
     local db = FN.db
     -- On a fresh install only Maps starts open; after that the player's own choices are kept.
     if type(db.collapsed) ~= "table" then
-        db.collapsed = { colors = true, nearby = true, lists = true, window = true }
+        db.collapsed = { colors = true, nearby = true, lists = true, window = true, tooltips = true }
+    end
+    -- The Tooltips section (new in 1.2.0) also starts closed for players who already had settings.
+    if not db.tooltipsFolded then
+        db.collapsed.tooltips = true
+        db.tooltipsFolded = true
     end
 
     local function Bool(key, refresh)
