@@ -10,17 +10,17 @@ Herb, ore and fishing pool locations on the minimap and world map, with a panel 
 
 <table align="center">
   <tr>
-    <td align="center" valign="top" width="270">
-      <img src="https://github.com/user-attachments/assets/85b2cdde-bf7d-4f43-836d-c24b1ef0a477" alt="The Forever Nodes button on the world map" width="252" height="210"><br>
+    <td align="center" valign="top" width="175">
+      <img src="https://github.com/user-attachments/assets/858ad784-4bea-4696-a80f-8f6a979c541f" alt="The trainer list" width="155" height="240"><br>
+      <sub>Closest and cheapest trainers, a click from a map pin.</sub>
+    </td>
+    <td align="center" valign="top" width="305">
+      <img src="https://github.com/user-attachments/assets/85b2cdde-bf7d-4f43-836d-c24b1ef0a477" alt="The Forever Nodes button on the world map" width="288" height="240"><br>
       <sub>Right on your world map, next to the quest log.</sub>
     </td>
-    <td align="center" valign="top" width="230">
-      <img src="https://github.com/user-attachments/assets/158dfd14-cf13-4997-9f9c-9a69a5f03a3a" alt="Minimap with node icons and nearby dots" width="213" height="210"><br>
+    <td align="center" valign="top" width="260">
+      <img src="https://github.com/user-attachments/assets/158dfd14-cf13-4997-9f9c-9a69a5f03a3a" alt="Minimap with node icons and nearby dots" width="243" height="240"><br>
       <sub>Nearby nodes turn into dots, or circles if you prefer.</sub>
-    </td>
-    <td align="center" valign="top" width="160">
-      <img src="https://github.com/user-attachments/assets/858ad784-4bea-4696-a80f-8f6a979c541f" alt="The trainer list" width="136" height="210"><br>
-      <sub>Closest and cheapest trainers, a click from a map pin.</sub>
     </td>
   </tr>
 </table>
