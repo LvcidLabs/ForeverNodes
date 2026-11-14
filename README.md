@@ -5,22 +5,22 @@
 Herb, ore and fishing pool locations on the minimap and world map, with a panel docked to the world map that shows your skill and where to train. Made for WoW: Forever, inspired by GatherMate2. Tired of alt-tabbing to Wowhead, or farming 20 minutes past a rank cap? Not anymore.
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/e91a1133-fe5d-4147-aa03-50926119ffa8" alt="The Herbalism panel docked to the world map" width="100%">
+  <img src="https://github.com/user-attachments/assets/6e34b0ad-d207-44dc-8f59-da4199fc485a" alt="The Herbalism panel docked to the world map" width="100%">
 </p>
 
 <table align="center">
   <tr>
     <td align="center" valign="top" width="270">
       <img src="https://github.com/user-attachments/assets/85b2cdde-bf7d-4f43-836d-c24b1ef0a477" alt="The Forever Nodes button on the world map" width="252" height="210"><br>
-      <sub>One click from the quest log.</sub>
+      <sub>Right on your world map, next to the quest log.</sub>
     </td>
     <td align="center" valign="top" width="230">
-      <img src="https://github.com/user-attachments/assets/158dfd14-cf13-4997-9f9c-9a69a5f03a3a" alt="Minimap with node icons and markers" width="213" height="210"><br>
-      <sub>Clean icons, nearby nodes become dots.</sub>
+      <img src="https://github.com/user-attachments/assets/158dfd14-cf13-4997-9f9c-9a69a5f03a3a" alt="Minimap with node icons and nearby dots" width="213" height="210"><br>
+      <sub>Nearby nodes turn into dots, or circles if you prefer.</sub>
     </td>
-    <td align="center" valign="top" width="235">
-      <img src="https://github.com/user-attachments/assets/07bc9690-1aa8-4c3c-91c8-38134fa8b392" alt="The Settings tab" width="217" height="210"><br>
-      <sub>Easy to access settings right in the panel.</sub>
+    <td align="center" valign="top" width="160">
+      <img src="https://github.com/user-attachments/assets/858ad784-4bea-4696-a80f-8f6a979c541f" alt="The trainer list" width="136" height="210"><br>
+      <sub>Closest and cheapest trainers, a click from a map pin.</sub>
     </td>
   </tr>
 </table>
