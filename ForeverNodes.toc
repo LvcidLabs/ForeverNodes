@@ -1,8 +1,8 @@
 ## Interface: 16001
 ## Title: Forever N|cffffd928o|cffffe050d|cffffe878e|cfffff0a0s|r
-## Notes: Herb, ore and fishing pool locations on the minimap and world map, with a settings panel docked to the world map.
+## Notes: Herb, ore and fishing pool locations on the minimap and world map, with a panel docked to the world map that shows your skill and where to train.
 ## Author: Lvcid
-## Version: 1.1.2
+## Version: 1.2.0
 ## IconTexture: Interface\AddOns\ForeverNodes\Icons\icon
 ## SavedVariables: ForeverNodesDB
 ## SavedVariablesPerCharacter: ForeverNodesCharDB
@@ -19,5 +19,7 @@ Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
 Data.lua
 Core.lua
 Record.lua
+Training.lua
+Tooltips.lua
 Options.lua
 Buttons.lua

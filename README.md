@@ -2,7 +2,7 @@
 
 # Forever Nodes
 
-A modern, simple gathering panel for WoW: Forever that's part of your world map, with node toggles only a click away. Comes preloaded with most known herbalism, mining and fishing locations. Made exclusively for WoW: Forever and heavily inspired by GatherMate2.
+Herb, ore and fishing pool locations on the minimap and world map, with a panel docked to the world map that shows your skill and where to train. Made for WoW: Forever, inspired by GatherMate2. Tired of alt-tabbing to Wowhead, or farming 20 minutes past a rank cap? Not anymore.
 
 <p align="center">
   <img src="https://github.com/user-attachments/assets/e91a1133-fe5d-4147-aa03-50926119ffa8" alt="The Herbalism panel docked to the world map" width="100%">
@@ -12,11 +12,11 @@ A modern, simple gathering panel for WoW: Forever that's part of your world map,
   <tr>
     <td align="center" valign="top" width="270">
       <img src="https://github.com/user-attachments/assets/85b2cdde-bf7d-4f43-836d-c24b1ef0a477" alt="The Forever Nodes button on the world map" width="252" height="210"><br>
-      <sub>Adds a button to your world map, shares space with quest log.</sub>
+      <sub>One click from the quest log.</sub>
     </td>
     <td align="center" valign="top" width="230">
       <img src="https://github.com/user-attachments/assets/158dfd14-cf13-4997-9f9c-9a69a5f03a3a" alt="Minimap with node icons and markers" width="213" height="210"><br>
-      <sub>Nearby nodes become customizable dots/circles (dots by default), just like Gatherer or GatherMate2.</sub>
+      <sub>Clean icons, nearby nodes become dots.</sub>
     </td>
     <td align="center" valign="top" width="235">
       <img src="https://github.com/user-attachments/assets/07bc9690-1aa8-4c3c-91c8-38134fa8b392" alt="The Settings tab" width="217" height="210"><br>
@@ -25,59 +25,72 @@ A modern, simple gathering panel for WoW: Forever that's part of your world map,
   </tr>
 </table>
 
+<br>
+
 ## How to Install
 
-**CurseForge:** install it from the [Forever Nodes CurseForge page](https://www.curseforge.com/wow/addons/forever-nodes) or the CurseForge app.
-
-**Manually:** download the zip from the [releases page](https://github.com/LvcidLabs/ForeverNodes/releases) and extract it into `World of Warcraft\_forever_\Interface\AddOns\`, so you end up with `AddOns\ForeverNodes\ForeverNodes.toc`.
-
-<br>
-
-## Getting started
-
-1. Open your world map.
-2. Click the **Forever Nodes** button in the bottom-right corner (or use the minimap button, or type `/fn`).
-3. Tick whichever nodes you want to track.
-
-Herbs and ore start hidden and fishing pools start on. Your ticks are saved per character, so each one can track its own nodes. Professions your character doesn't have are greyed out; you can unlock them in Settings → Professions.
+- **CurseForge:** [Forever Nodes](https://www.curseforge.com/wow/addons/forever-nodes) or the CurseForge app.
+- **Manually:** extract the [latest release](https://github.com/LvcidLabs/ForeverNodes/releases) into `World of Warcraft\_forever_\Interface\AddOns\`.
 
 <br>
 
-## Features
+## Start
 
-- **Preloaded node locations** for herbalism, mining and fishing pools across Azeroth, ready the moment you install. No additional data imports necessary
-- **Docked to your world map:** the panel swaps places with the quest log in one click, or use it as a floating window if you prefer
-- **Pick exactly what shows:** tick the herbs, veins and pools you want, sorted by skill level or name, with your own skill shown in difficulty colors
-- **Clean minimap icons** that switch to a small colored marker once you're close enough for the game's own tracking to take over
-- **Fishing pools only appear while a fishing pole is equipped**
-- **Only show what you're tracking:** herbs appear while Find Herbs is on and ore while Find Minerals is on, so switching tracking switches the map too (on by default, and characters without the tracking spell still see them)
-- **Square and round minimaps** are detected automatically, with an adjustable draw range
-- **Records new spots** you discover, so your map keeps growing as you play
-- **Minimap button:** left click opens the panel, right click toggles world map icons
-- **Fits your UI:** currently supports a native theme and an auto-detected EllesmereUI theme
+Open your map → **Forever Nodes** button → tick what you want. Or type `/fn`.
 
 <br>
 
-## Quality of life
+## Find the good stuff
 
-- **No tooltips on minimap icons:** they intentionally ignore the mouse, so hovering the minimap shows what's actually there (the real herb, vein or pool) instead of a map icon getting in the way
-- **One-click icon toggle:** right click the world map button (or the minimap button) to hide or show map icons instantly, without opening anything
-- **Uncluttered list:** nodes for professions you don't have are greyed out, so the ones you can gather stand out
-- **Per-character node lists:** each character keeps its own ticked herbs, veins and pools, so a low-level alt and your main can track different things. Everything else (looks, colors, recorded spots, window) is shared across your account
-- **Separate scales** for the docked and floating panel, so each can be sized to fit
-- **Lightweight:** icons are reused rather than recreated, and only nodes near you are checked as you move, so it stays smooth even with every node type enabled
+- **Built into your map:** lives where the quest log does. One click to swap.
+- **Toggle in a click:** switch any node on or off right from your map, any time. Herbs and ore show while you track them, pools while you hold a pole.
+- **Preloaded:** most known herbs, veins and fishing pools, ready from day one. No imports, no setup.
+- **Grows as you play:** on top of all that, new spots you find get added.
+
+<br>
+
+## Level up without the guesswork
+
+- **Skill bar:** your rank at a glance. It glows when you're ready to train.
+- **Trainer finder:** closest and cheapest trainer, rep discounts included. One click drops a map pin.
+- **Rank lines:** see exactly where your current rank tops out.
+- **A little "Gz!":** a chat shout-out when you cap a rank, and a nudge if you forget to train.
+
+<br>
+
+## Hover to know
+
+- **Required skill on every tooltip:** on the world map and in the world, colored by difficulty. Peacebloom at 300? Grey. Black Lotus at 150? Red.
+
+<br>
+
+## Make it yours
+
+- **Colors:** pick each profession's color.
+- **Icons:** size, round or square, dots or circles for nearby nodes.
+- **Tooltips:** level before or after the name, brackets or not, what gets colored.
+- **Panel:** docked or floating, scaled to fit.
+- **Look:** native, or EllesmereUI's automatically.
+
+<br>
+
+## Little things, done right
+
+- Minimap icons never block the game's own tooltips
+- Ticks saved per character, so every alt keeps its own list
+- Square or round minimap, auto-detected
 
 <br>
 
 ## Feedback
 
-Found a node that's missing or in the wrong place? Open an [issue](https://github.com/LvcidLabs/ForeverNodes/issues) or leave a comment on CurseForge with the zone and coordinates.
+Missing or misplaced node? [Open an issue](https://github.com/LvcidLabs/ForeverNodes/issues) with the zone and coordinates.
 
 <br>
 
 ## Credits
 
-Node data and icons are based on GatherLite by Wuild (MIT). Inspired by GatherMate2. Uses HereBeDragons, LibStub, CallbackHandler, LibDataBroker and LibDBIcon. See [CREDITS.txt](CREDITS.txt).
+Node data and icons are based on GatherLite by Wuild (MIT). Uses HereBeDragons, LibStub, CallbackHandler, LibDataBroker and LibDBIcon. See [CREDITS.txt](CREDITS.txt).
 
 <br>
 

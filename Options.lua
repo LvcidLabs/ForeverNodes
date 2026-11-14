@@ -19,6 +19,30 @@ local floor = math.floor
 
 local GOLD = { 1, 0.82, 0 }
 local BRONZE = { 0.753, 0.541, 0.243 }
+-- Quiet trim for structure (section edges and rules), matching the controls' neutral edges with a
+-- touch of the theme's warmth; gold stays for what is active or selected.
+local TRIM = { 0.92, 0.86, 0.76, 0.24 }
+
+-- Clicking a panel control takes keyboard focus from the chat box (the typed text stays, but
+-- typing stops). The control notes which edit box had focus and hands it back after the click.
+local function KeepChatFocus(b)
+    local function Note()
+        local f = GetCurrentKeyBoardFocus and GetCurrentKeyBoardFocus()
+        if f and f.IsObjectType and f:IsObjectType("EditBox") then b.fnFocus = f end
+    end
+    local function Restore()
+        local f = b.fnFocus
+        -- Only a message still being written (an always-shown, empty chat box is left alone).
+        if f and f:IsShown() and not f:HasFocus() and (f:GetText() or "") ~= "" then f:SetFocus() end
+    end
+    b:HookScript("OnEnter", Note)
+    b:HookScript("OnMouseDown", Note)
+    b:HookScript("OnLeave", function() b.fnFocus = nil end)
+    b:HookScript("PostClick", function()
+        Restore()
+        if C_Timer then C_Timer.After(0, Restore) end
+    end)
+end
 local MUTED = { 0.63, 0.63, 0.63 }
 
 if EllesmereUI and EllesmereUI.RegisterSkin then
@@ -71,6 +95,7 @@ local function StockButton(parent, text, width, height, onClick)
     b:SetText(text)
     b.text = b:GetFontString()
     b:SetScript("OnClick", onClick)
+    KeepChatFocus(b)
     function b:SetSelected(selected)
         if selected then self:LockHighlight() else self:UnlockHighlight() end
     end
@@ -150,25 +175,77 @@ local function Scroller(parent)
     child:SetSize(1, 1)
     sf:SetScrollChild(child)
     sf.child = child
-    local thumb = Fill(sf, "OVERLAY", BRONZE[1], BRONZE[2], BRONZE[3], 0.8)
+    -- The marker is a slim bar inside a wider, invisible grip that can be dragged.
+    local grip = CreateFrame("Button", nil, sf)
+    grip:SetWidth(11)
+    grip:SetFrameLevel(sf:GetFrameLevel() + 10)
+    local thumb = Fill(grip, "OVERLAY", BRONZE[1], BRONZE[2], BRONZE[3], 0.8)
     thumb:SetWidth(3)
+    thumb:SetPoint("TOP", grip, "TOP", 0, 0)
+    thumb:SetPoint("BOTTOM", grip, "BOTTOM", 0, 0)
+    local function Lit(on) -- brighter while hovered or dragged
+        local c = on and GOLD or BRONZE
+        thumb:SetColorTexture(c[1], c[2], c[3], on and 1 or 0.8)
+    end
+
+    -- Rows fade out as they scroll up under the top edge, instead of being cut off there.
+    -- Frames marked .noFade (large backgrounds) stay as they are.
+    function sf:FadeTop()
+        local zone, top = self.fadeTop, self:GetTop()
+        if not zone or not top then return end
+        for _, f in ipairs({ child:GetChildren() }) do
+            if not f.noFade and f:IsShown() then
+                local b, t = f:GetBottom(), f:GetTop()
+                local a = 1
+                if b and t and t > top then
+                    local shown = top - b
+                    a = shown <= 0 and 0 or math.min(1, shown / math.min(t - b, zone))
+                end
+                f:SetAlpha(a)
+            end
+        end
+    end
 
     function sf:Update()
         local view, content = self:GetHeight(), child:GetHeight()
         local range = math.max(0, content - view)
         local offset = math.min(self:GetVerticalScroll(), range)
         self:SetVerticalScroll(offset)
+        self:FadeTop()
         if range <= 0 or view <= 0 then
-            thumb:Hide()
+            grip:Hide()
             return
         end
         local size = math.max(20, view * view / content)
-        thumb:SetHeight(size)
-        thumb:ClearAllPoints()
+        self.range, self.travel = range, view - size
+        grip:SetHeight(size)
+        grip:ClearAllPoints()
         -- thumbOffset pushes the marker out past the pane's border, like the quest log's scroll bar.
-        thumb:SetPoint("TOPRIGHT", self, "TOPRIGHT", self.thumbOffset or 0, -(view - size) * (offset / range))
-        thumb:Show()
+        grip:SetPoint("TOPRIGHT", self, "TOPRIGHT", (self.thumbOffset or 0) + 4, -(view - size) * (offset / range))
+        grip:Show()
     end
+    -- Dragging: the marker follows the cursor, and the list follows the marker.
+    local function CursorY() return select(2, GetCursorPosition()) / grip:GetEffectiveScale() end
+    grip:SetScript("OnMouseDown", function(self, button)
+        if button ~= "LeftButton" then return end
+        self.fromY, self.fromScroll = CursorY(), sf:GetVerticalScroll()
+        Lit(true)
+        self:SetScript("OnUpdate", function()
+            local travel = sf.travel or 0
+            if travel <= 0 then return end
+            local scroll = self.fromScroll + (self.fromY - CursorY()) * (sf.range / travel)
+            sf:SetVerticalScroll(math.max(0, math.min(sf.range, scroll)))
+            sf:Update()
+        end)
+    end)
+    grip:SetScript("OnMouseUp", function(self)
+        self:SetScript("OnUpdate", nil)
+        Lit(self:IsMouseOver())
+    end)
+    grip:SetScript("OnHide", function(self) self:SetScript("OnUpdate", nil); Lit(false) end)
+    grip:SetScript("OnEnter", function() Lit(true) end)
+    grip:SetScript("OnLeave", function(self) if not self:GetScript("OnUpdate") then Lit(false) end end)
+
     sf:EnableMouseWheel(true)
     sf:SetScript("OnMouseWheel", function(self, delta)
         self:SetVerticalScroll(math.max(0, self:GetVerticalScroll() - delta * ROW_HEIGHT * 2))
@@ -176,35 +253,6 @@ local function Scroller(parent)
     end)
     sf:SetScript("OnSizeChanged", function(self) self:Update() end)
     return sf
-end
-
--- A card-style button: faint fill and edge, bronze when selected.
-local function Card(parent, text, width, height, onClick)
-    if Stock() then
-        local stock = StockButton(parent, text, width, height, onClick)
-        if stock then return stock end
-    end
-    local b = CreateFrame("Button", nil, parent)
-    b:SetSize(width, height)
-    b.bg = Fill(b, "BACKGROUND", 1, 1, 1, 0.04)
-    b.bg:SetAllPoints()
-    b.edges = Outline(b, b, 1, 1, 1, 0.20)
-    local hl = b:CreateTexture(nil, "HIGHLIGHT")
-    hl:SetColorTexture(BRONZE[1], BRONZE[2], BRONZE[3], 0.12)
-    hl:SetAllPoints()
-    b.text = Label(b, "GameFontNormalSmall", text)
-    b.text:SetPoint("CENTER")
-    b:SetScript("OnClick", onClick)
-    function b:SetSelected(selected)
-        if selected then
-            self.bg:SetColorTexture(BRONZE[1], BRONZE[2], BRONZE[3], 0.18)
-            for _, edge in ipairs(self.edges) do edge:SetColorTexture(BRONZE[1], BRONZE[2], BRONZE[3], 0.70) end
-        else
-            self.bg:SetColorTexture(1, 1, 1, 0.04)
-            for _, edge in ipairs(self.edges) do edge:SetColorTexture(1, 1, 1, 0.20) end
-        end
-    end
-    return b
 end
 
 -- A rounded-square texture covering `owner`.
@@ -215,6 +263,35 @@ local function Rounded(owner, layer, file)
     -- Keep the corners round at any size (stretches only the middle).
     if t.SetTextureSliceMargins then t:SetTextureSliceMargins(10, 10, 10, 10) end
     return t
+end
+
+-- A card-style button: faint fill and edge, bronze when selected.
+local function Card(parent, text, width, height, onClick)
+    if Stock() then
+        local stock = StockButton(parent, text, width, height, onClick)
+        if stock then return stock end
+    end
+    local b = CreateFrame("Button", nil, parent)
+    b:SetSize(width, height)
+    -- Rounded, like the tabs and the switches, so every control shares one shape.
+    b.bg = Rounded(b, "BACKGROUND", "round_fill"); b.bg:SetVertexColor(0, 0, 0, 0.45)
+    b.edge = Rounded(b, "BORDER", "round_edge"); b.edge:SetVertexColor(1, 1, 1, 0.22)
+    local hl = Rounded(b, "HIGHLIGHT", "round_fill")
+    hl:SetVertexColor(BRONZE[1], BRONZE[2], BRONZE[3], 0.18)
+    b.text = Label(b, "GameFontNormalSmall", text)
+    b.text:SetPoint("CENTER")
+    b:SetScript("OnClick", onClick)
+    KeepChatFocus(b)
+    function b:SetSelected(selected)
+        if selected then
+            self.bg:SetVertexColor(BRONZE[1], BRONZE[2], BRONZE[3], 0.30)
+            self.edge:SetVertexColor(GOLD[1], GOLD[2], GOLD[3], 0.85)
+        else
+            self.bg:SetVertexColor(0, 0, 0, 0.45)
+            self.edge:SetVertexColor(1, 1, 1, 0.22)
+        end
+    end
+    return b
 end
 
 -- An icon-only tab for the side panel's top row: gold edge when it is the open page.
@@ -247,6 +324,7 @@ local function IconTab(parent, icon, onClick)
     b.level:SetPoint("BOTTOM", 0, stock and 4 or 5)
     b.level:SetText(" ")
     b:SetScript("OnClick", onClick) -- no tooltip: the page title says which tab is open
+    KeepChatFocus(b)
     function b:SetSelected(isSelected)
         self.isSelected = isSelected
         if self.stockPlate then
@@ -293,6 +371,7 @@ local function Segment(parent, text, width, onClick)
     b.text = Label(b, "GameFontHighlightSmall", text)
     b.text:SetPoint("CENTER")
     b:SetScript("OnClick", onClick)
+    KeepChatFocus(b)
     function b:SetSelected(selected)
         if selected then
             self.bg:SetVertexColor(BRONZE[1], BRONZE[2], BRONZE[3], 0.60)
@@ -343,6 +422,7 @@ local function PairToggle(parent, leftText, rightText, onClick)
     divider:SetSize(1, 12)
     divider:SetPoint("CENTER", b, "LEFT", leftWidth, 0)
     b:SetScript("OnClick", onClick)
+    KeepChatFocus(b)
 
     function b:SetRight(isRight)
         self.half:ClearAllPoints()
@@ -637,15 +717,12 @@ end
 local frame
 local nodesPage = { rows = {}, tabs = {} }
 
--- Skill-up colors as recipes show them: r, g, b, and whether the row gets a tinted background.
+-- Skill-up colors as the game shows them (Forever's bands, see FN:DifficultyColor):
+-- r, g, b, and whether the row gets a tinted background (orange, yellow, green only).
 local function Difficulty(skill, need)
-    if not skill or need <= 0 then return MUTED[1], MUTED[2], MUTED[3], false end
-    if skill < need then return 1, 0.13, 0.13, false end -- cannot gather yet
-    local over = skill - need
-    if over < 25 then return 1, 0.5, 0.25, true end      -- orange
-    if over < 50 then return 1, 1, 0, true end           -- yellow
-    if over < 100 then return 0.25, 0.75, 0.25, true end -- green
-    return 0.5, 0.5, 0.5, false                          -- grey
+    if need <= 0 then return MUTED[1], MUTED[2], MUTED[3], false end
+    local r, g, b, name = FN:DifficultyColor(skill, need)
+    return r, g, b, (name == "orange" or name == "yellow" or name == "green")
 end
 
 local LIST_BLEED = 9 -- how far left of the page the pane's border is: row stripes run out to it
@@ -657,13 +734,26 @@ local function CreateRow(parent)
     -- both run from the pane's border to the row's right edge.
     r.line = Fill(r, "BACKGROUND", 1, 1, 1, 0.07)
     r.line:SetHeight(1)
-    r.line:SetPoint("BOTTOMLEFT", -LIST_BLEED, 0)
+    r.line:SetPoint("BOTTOMLEFT", 0, 0)
     r.line:SetPoint("BOTTOMRIGHT")
     local hl = r:CreateTexture(nil, "HIGHLIGHT")
     hl:SetColorTexture(1, 1, 1, 0.08)
-    hl:SetPoint("TOPLEFT", -LIST_BLEED, 0)
+    hl:SetPoint("TOPLEFT", 0, 0)
     hl:SetPoint("BOTTOMRIGHT")
 
+    -- Rank cutoff: a slightly stronger line along the row's top edge, where a rank ends.
+    -- It runs edge to edge of the pane (past the row on both sides) to read as a tier break.
+    r.cut = Fill(r, "BORDER", 1, 1, 1, 0.12)
+    r.cut:SetHeight(1)
+    r.cut:SetPoint("TOPLEFT", -LIST_BLEED, 0)
+    r.cut:SetPoint("TOPRIGHT", LIST_BLEED, 0)
+    r.cut:Hide()
+    -- The cutoff's one-time shimmer (the line the next rank removes), played by the panel.
+    r.shimmer = Fade(r, "OVERLAY", GOLD[1], GOLD[2], GOLD[3], 0.55)
+    r.shimmer:SetHeight(2)
+    r.shimmer:SetPoint("TOPLEFT", -LIST_BLEED, 1)
+    r.shimmer:SetPoint("TOPRIGHT", LIST_BLEED, 1)
+    r.shimmer:Hide()
     r.box, r.mark = TickBox(r)
     r.box:SetPoint("LEFT", 2, 0)
     -- The skill color starts after the tick box, which sits in its own plain
@@ -697,17 +787,21 @@ local function RefreshNodes()
     local db = FN.db
 
     -- The profession picked in the left list. One this character lacks is only
-    -- opened while "Lock professions I don't have" is off.
+    -- opened while "Allow access to unlearned professions" is on.
     local skills = {}
-    for _, kind in ipairs(FN.kinds) do skills[kind] = FN:GetSkill(kind) end
+    for _, kind in ipairs(FN.kinds) do skills[kind] = FN:GetSkillInfo(kind) end
     local current = page.kind
     if current and not (skills[current] or db.showAll) then current = nil end
 
     -- Docked to the map the window is narrow: the controls tighten up to stay on
     -- one row with the title, and the list is a single scrolling column.
-    local compact = frame.docked
+    local compact = frame.narrow
     local pageWidth = frame.pageWidth or (compact and (DOCK_WIDTH - 40) or (WIDTH - NAV_WIDTH - 48))
-    local listTop = -36
+    -- The skill header (card art and bar) sits between the title row and the list.
+    local headerH = current and page.header and page.header:Layout(current, skills[current]) or 0
+    if not current and page.header then page.header:Hide() end
+    local listTop = -36 - headerH
+    if page.trainers and page.trainers.open and current then listTop = listTop + 7 end
     page.none:SetWidth(compact and 96 or 104)
     page.all:SetWidth(compact and 68 or 76)
     page.rule:ClearAllPoints()
@@ -718,7 +812,7 @@ local function RefreshNodes()
     -- page) so the row stripes can run out to it; the rows themselves stay put.
     page.scroll:SetPoint("TOPLEFT", -LIST_BLEED, listTop)
     page.scroll:SetPoint("BOTTOMRIGHT", 0, 0)
-    page.fishNote:SetShown(current == "fish")
+    page.fishNote:SetShown(current == "fish" and db.onlyPole)
 
     page.title:SetText(current and FN.kindNames[current] or "")
     page.sortToggle:SetMode(db.sort)
@@ -727,10 +821,19 @@ local function RefreshNodes()
     page.none:SetShown(current ~= nil)
     page.empty:SetShown(current == nil)
 
+    local info = current and skills[current]
+    local ranked = info and current ~= "fish" -- dimming and rank lines are for herbs and ore
+    local cap = info and info.max or 0
+    local below300 = ranked and cap < 300
+
     local list = {}
     if current then
         for _, node in ipairs(FN.nodes) do
-            if node.kind == current then list[#list + 1] = node end
+            if node.kind == current then
+                -- A-Z can't show rank lines, so it can leave out what the rank can't reach.
+                local hide = db.sort == "name" and not db.azShowBeyond and below300 and node.skill > cap
+                if not hide then list[#list + 1] = node end
+            end
         end
         if db.sort == "name" then
             table.sort(list, function(a, b) return a.name < b.name end)
@@ -743,9 +846,41 @@ local function RefreshNodes()
     end
     page.list = list
 
+    -- Rank lines: after the last node each untrained rank's cap can gather (Lvl sort only).
+    local gates = {}
+    if below300 and db.cutoffs and db.sort ~= "name" then
+        for _, r in ipairs(FN.RANKS) do
+            if r.cap >= cap and r.cap < 300 then gates[#gates + 1] = r.cap end
+        end
+    end
+    -- At trained skill 300 (with the mute option) the list drops its difficulty colors.
+    local muted = info and current ~= "fish" and info.rank >= 300 and db.muteAtMax
+    page.gateRow = nil
+
+    -- The trainer list (when open) sits at the top of the same scroll area and pushes the rows down.
+    local trainersH = 0
+    if page.trainers then
+        -- One bad trainer row must not stop the node list from being placed under it.
+        local ok, h = pcall(page.trainers.Layout, page.trainers, current, pageWidth)
+        if ok then trainersH = h or 0 else geterrorhandler()(h) end
+    end
+    -- With the trainer list open, the bronze rule moves from above the list to just under the
+    -- trainer section, in the gap before the node rows.
+    if trainersH > 0 and not page.trainerRule then
+        page.trainerRule = Fill(page.scroll.child, "ARTWORK", BRONZE[1], BRONZE[2], BRONZE[3], 0.35)
+        page.trainerRule:SetHeight(1)
+    end
+    page.rule:SetShown(trainersH <= 0)
+    if page.trainerRule then
+        page.trainerRule:SetShown(trainersH > 0)
+        page.trainerRule:ClearAllPoints()
+        page.trainerRule:SetPoint("TOPLEFT", page.scroll.child, "TOPLEFT", LIST_BLEED, -(trainersH - 5))
+        page.trainerRule:SetWidth(pageWidth)
+    end
+
     local perCol = compact and #list or math.ceil(#list / 2)
-    local rowWidth = compact and (pageWidth - 6) or COL_WIDTH
-    local skill = current and skills[current]
+    local rowWidth = compact and pageWidth or COL_WIDTH -- same span as the skill bar
+    local skill = info and info.effective
     for i, node in ipairs(list) do
         local row = page.rows[i]
         if not row then
@@ -756,15 +891,50 @@ local function RefreshNodes()
         local line = (i - 1) % perCol
         row:SetWidth(rowWidth)
         row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", LIST_BLEED + col * (COL_WIDTH + COL_GAP), -line * ROW_HEIGHT)
+        row:SetPoint("TOPLEFT", LIST_BLEED + col * (COL_WIDTH + COL_GAP), -line * ROW_HEIGHT - trainersH)
         row.node = node
         row.icon:SetTexture(node.icon)
         row.name:SetText(node.name)
         row.mark:SetShown(FN.enabled[node.key] and true or false)
-        local r, g, b, tinted = Difficulty(skill, node.skill)
         row.skill:SetText(node.skill > 0 and node.skill or "")
-        row.skill:SetTextColor(r, g, b)
-        row.tint:SetFade(r, g, b, tinted and 0.38 or 0)
+
+        -- Beyond the current rank: greyed name, number and icon, no color wash.
+        local dim = below300 and node.skill > cap
+        if dim then
+            row.name:SetTextColor(0.33, 0.33, 0.33)
+            row.skill:SetTextColor(0.27, 0.27, 0.27)
+            row.icon:SetDesaturated(true)
+            row.icon:SetAlpha(0.35)
+            row.tint:SetFade(1, 1, 1, 0)
+        else
+            row.name:SetTextColor(1, 1, 1)
+            row.icon:SetDesaturated(false)
+            row.icon:SetAlpha(1)
+            if muted then
+                row.skill:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+                row.tint:SetFade(1, 1, 1, 0)
+            elseif not info and node.skill > 0 then
+                row.skill:SetTextColor(1, 0.13, 0.13) -- profession not known: can't gather
+                row.tint:SetFade(1, 1, 1, 0)
+            else
+                local r, g, b, tinted = Difficulty(skill, node.skill)
+                row.skill:SetTextColor(r, g, b)
+                row.tint:SetFade(r, g, b, tinted and 0.38 or 0)
+            end
+        end
+
+        local cut = false
+        local prev = list[i - 1]
+        if prev and line > 0 then
+            for _, T in ipairs(gates) do
+                if prev.skill <= T and node.skill > T then
+                    cut = true
+                    if T == cap then page.gateRow = row end -- the line the next rank removes
+                end
+            end
+        end
+        row.cut:SetShown(cut)
+        row.shimmer:Hide()
         row:Show()
     end
     for i = #list + 1, #page.rows do page.rows[i]:Hide() end
@@ -774,12 +944,1159 @@ local function RefreshNodes()
     local note = page.fishNote
     note:SetParent(page.scroll.child)
     note:ClearAllPoints()
-    note:SetPoint("TOP", page.scroll.child, "TOPLEFT", LIST_BLEED + pageWidth / 2, -perCol * ROW_HEIGHT - 16)
+    note:SetPoint("TOP", page.scroll.child, "TOPLEFT", LIST_BLEED + pageWidth / 2, -perCol * ROW_HEIGHT - 16 - trainersH)
     local listHeight = perCol * ROW_HEIGHT
-    if current == "fish" then listHeight = listHeight + 16 + math.ceil(note:GetStringHeight()) end
+    if current == "fish" and db.onlyPole then listHeight = listHeight + 16 + math.ceil(note:GetStringHeight()) end
 
-    page.scroll.child:SetSize(pageWidth + LIST_BLEED, math.max(1, listHeight))
+    page.scroll.child:SetSize(pageWidth + LIST_BLEED, math.max(1, listHeight + trainersH))
     page.scroll:Update()
+    if page.OnListDrawn then page:OnListDrawn() end
+end
+
+-- Skill header: the profession's card art, the animated skill bar, and the trainer list ---------
+-- Rebuilt from the art the game's Professions pane uses (ProfessionsRankBarTemplate), so it
+-- looks and moves the same: the fill art keeps its native size and is cropped (never squished),
+-- the frame is drawn in three slices so its ornate ends keep their shape, the fill's flipbook
+-- plays once for 2 s whenever the bar is shown or changes, then holds still.
+
+local CARD_ATLAS = { herb = "Profession-overview-Card-Herbalism", ore = "Profession-overview-Card-Mining",
+    fish = "Profession-overview-card-generic-fishing" }
+local KIT = { herb = "Herbalism", ore = "Mining", fish = "Fishing" }
+-- The fishing card is a tall portrait card whose picture sits in its lower half; start lower.
+-- How far down each card's crop starts: the illustrations sit mid-card, below the empty top edge.
+local ART_DOWN = { herb = 40, ore = 40, fish = 150 }
+local GLOW = { herb = { 0.35, 1, 0.6 }, ore = { 0.69, 0.8, 0.92 }, fish = { 0.35, 0.86, 1 } }
+local BAR_H = 24        -- hit area; the fill itself is the native 18px tall
+local FILL_H = 18
+local HEADER_H = 34       -- space the header adds above the list (bar plus breathing room)
+local LMB = "|TInterface\\TutorialFrame\\UI-Tutorial-Frame:12:12:0:0:512:512:10:65:228:283|t"
+
+-- Small tween helper: fades a region's alpha to `to` over `dur` seconds, then calls `done`.
+local tweener = CreateFrame("Frame")
+local tweens = {}
+tweener:SetScript("OnUpdate", function(_, elapsed)
+    for region, tw in pairs(tweens) do
+        tw.t = tw.t + elapsed
+        local k = tw.dur > 0 and math.min(tw.t / tw.dur, 1) or 1
+        local e = k < 0.5 and 2 * k * k or 1 - (-2 * k + 2) ^ 2 / 2 -- ease in-out
+        region:SetAlpha(tw.from + (tw.to - tw.from) * e)
+        if k >= 1 then
+            tweens[region] = nil
+            if tw.done then tw.done() end
+        end
+    end
+end)
+local function FadeTo(region, to, dur, done)
+    if dur <= 0 then tweens[region] = nil; region:SetAlpha(to); if done then done() end return end
+    tweens[region] = { from = region:GetAlpha(), to = to, dur = dur, t = 0, done = done }
+end
+
+-- Draws an atlas cropped to its top-right `w` x `h` pixels (pinned top-right, never scaled).
+-- `inset` skips that many pixels of the art's own top and right edge (the card's border).
+-- `down` starts the crop that many pixels lower (for art whose picture sits low on the card).
+local function CropAtlas(tex, atlas, w, h, inset, down)
+    local info = C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas)
+    if not info then tex:Hide() return end
+    local W, H = info.width, info.height
+    inset = inset or 0
+    -- When the area is bigger than the picture, the picture scales up to fill it (never squished).
+    local zoom = math.max(1, w / (W - inset), h / (H - inset))
+    local sw, sh = w / zoom, h / zoom
+    down = math.max(0, math.min(down or 0, H - inset - sh))
+    tex:SetTexture(info.file)
+    local l, r, t, b = info.leftTexCoord, info.rightTexCoord, info.topTexCoord, info.bottomTexCoord
+    local px, py = (r - l) / W, (b - t) / H
+    local right, top = r - px * inset, t + py * (inset + down)
+    tex:SetTexCoord(right - px * sw, right, top, top + py * sh)
+    tex:SetSize(w, h)
+    tex:Show()
+end
+
+-- An atlas drawn in three slices: fixed left and right caps, a stretched middle.
+local function ThreeSlice(parent, layer, sub)
+    local s = { parent:CreateTexture(nil, layer, nil, sub), parent:CreateTexture(nil, layer, nil, sub),
+        parent:CreateTexture(nil, layer, nil, sub) }
+    function s:Set(atlas, width, cap)
+        local info = C_Texture.GetAtlasInfo(atlas)
+        if not info then for i = 1, 3 do self[i]:Hide() end return end
+        local W, H = info.width, info.height
+        local l, r, t, b = info.leftTexCoord, info.rightTexCoord, info.topTexCoord, info.bottomTexCoord
+        local c = (r - l) * cap / W
+        for i = 1, 3 do self[i]:SetTexture(info.file); self[i]:SetHeight(H); self[i]:Show() end
+        self[1]:SetTexCoord(l, l + c, t, b); self[1]:SetWidth(cap)
+        self[3]:SetTexCoord(r - c, r, t, b); self[3]:SetWidth(cap)
+        self[2]:SetTexCoord(l + c, r - c, t, b); self[2]:SetWidth(math.max(1, width - 2 * cap))
+        self.height = H
+    end
+    function s:Anchor(point, rel, x, y)
+        self[1]:ClearAllPoints(); self[1]:SetPoint(point, rel, point, x, y)
+        self[2]:ClearAllPoints(); self[2]:SetPoint("LEFT", self[1], "RIGHT")
+        self[3]:ClearAllPoints(); self[3]:SetPoint("LEFT", self[2], "RIGHT")
+    end
+    function s:SetVertexColor(r, g, b) for i = 1, 3 do self[i]:SetVertexColor(r, g, b) end end
+    return s
+end
+
+local COIN = {
+    "|TInterface\\MoneyFrame\\UI-GoldIcon:13:13:2:0|t",
+    "|TInterface\\MoneyFrame\\UI-SilverIcon:13:13:2:0|t",
+    "|TInterface\\MoneyFrame\\UI-CopperIcon:13:13:2:0|t",
+}
+-- Coins: each number sits snug against its icon, with a clear gap before the next coin.
+local function Money(copper)
+    if copper == 0 then return "|cff9d9d9dfree|r" end
+    local parts = { math.floor(copper / 10000), math.floor(copper % 10000 / 100), copper % 100 }
+    local out = {}
+    for i = 1, 3 do
+        if parts[i] > 0 then out[#out + 1] = parts[i] .. COIN[i] end
+    end
+    return table.concat(out, "  ")
+end
+
+-- "5g", "4g 50s", "45s": short money text with the game's coin colors on the letters.
+local function ShortMoney(c)
+    if c == 0 then return "|cff9d9d9dfree|r" end
+    local g, sv, cp = math.floor(c / 10000), math.floor(c % 10000 / 100), c % 100
+    local out = {}
+    if g > 0 then out[#out + 1] = g .. "|cffffd100g|r" end
+    if sv > 0 then out[#out + 1] = sv .. "|cffc7c7cfs|r" end
+    if cp > 0 then out[#out + 1] = cp .. "|cffeda55fc|r" end
+    return table.concat(out, " ")
+end
+
+-- Under 1000 yards it counts every yard; above that it rounds to thousands ("14k yd").
+local function Yards(y)
+    if y < 1000 then return y .. " yd" end
+    return math.floor(y / 1000 + 0.5) .. "k yd"
+end
+
+-- The cheapest price among `list`.
+local function Cheapest(list)
+    local low
+    for _, t in ipairs(list) do if not low or t.cost < low then low = t.cost end end
+    return low
+end
+local function Affordable(cost) return GetMoney() >= cost end
+
+local REACTION = { friendly = "|cff4cd44c", neutral = "|cffe8cc3a", hostile = "|cffff4040" }
+
+local function BuildHeader(page)
+    local H = {}
+    page.header = H
+
+    -- Card art, top-right, cropped to the header area. Drawn on the page's background layer.
+    local pf = page.frame -- the page's frame (page itself is the node page's state table)
+    H.art = pf:CreateTexture(nil, "BACKGROUND", nil, 1)
+    -- The page sits 10px inside the pane on each side and at the top; the art covers that margin
+    -- too (1px short of the pane's edge line), so it fills the whole fixed area above the list.
+    local ART_PAD = 9
+    H.art:SetPoint("TOPRIGHT", pf, "TOPRIGHT", ART_PAD, ART_PAD)
+    -- The picture's bottom fades out toward the list. A texture takes one gradient only (the
+    -- left-to-right one), so the last FADE_H px are drawn as thin strips of the same picture,
+    -- each a little fainter than the one above.
+    local FADE_H, FADE_STEPS = 18, 9
+    H.fade = {}
+    function H:FadeBottom(strength, desat)
+        local art = H.art
+        if not art:IsShown() then
+            for _, t in ipairs(H.fade) do t:Hide() end
+            return
+        end
+        local w, h = art:GetSize()
+        local ulx, uly, llx, lly, urx = art:GetTexCoord()
+        local keep = math.max(1, h - FADE_H)
+        local v = (lly - uly) / h -- texture coordinate per pixel, vertically
+        art:SetHeight(keep)
+        art:SetTexCoord(ulx, urx, uly, uly + v * keep)
+        local step = FADE_H / FADE_STEPS
+        for i = 1, FADE_STEPS do
+            local t = H.fade[i]
+            if not t then
+                t = pf:CreateTexture(nil, "BACKGROUND", nil, 1)
+                H.fade[i] = t
+            end
+            t:SetTexture(art:GetTexture())
+            t:SetDesaturated(desat)
+            t:ClearAllPoints()
+            t:SetPoint("TOPRIGHT", art, "BOTTOMRIGHT", 0, -(i - 1) * step)
+            t:SetSize(w, step)
+            local top = uly + v * (keep + (i - 1) * step)
+            t:SetTexCoord(ulx, urx, top, top + v * step)
+            local a = strength * (1 - (i - 0.5) / FADE_STEPS)
+            if t.SetGradient and CreateColor then
+                t:SetGradient("HORIZONTAL", CreateColor(1, 1, 1, 0), CreateColor(1, 1, 1, a))
+            else
+                t:SetAlpha(a)
+            end
+            t:Show()
+        end
+    end
+    H.art:SetAlpha(0.55)
+
+    -- The bar.
+    local bar = CreateFrame("Button", nil, pf)
+    H.bar = bar
+    bar:SetHeight(BAR_H)
+    bar:RegisterForClicks("LeftButtonUp")
+    -- Background and frame are stretched to width exactly as the game's own bar does it.
+    bar.bg = bar:CreateTexture(nil, "BACKGROUND", nil, 2)
+    bar.bg:SetColorTexture(0, 0, 0, 0.92)
+    bar.bg:SetPoint("TOPLEFT", bar, "TOPLEFT", 2, -3)
+    bar.bg:SetHeight(FILL_H)
+    bar.clip = CreateFrame("Frame", nil, bar)
+    bar.clip:SetClipsChildren(true)
+    -- As in the native bar: fill 2px in from the left and 3px down, at its full 441x18 size.
+    bar.clip:SetPoint("TOPLEFT", 2, -3)
+    bar.clip:SetHeight(FILL_H)
+    bar.fill = bar.clip:CreateTexture(nil, "ARTWORK")
+    bar.fill:SetPoint("TOPLEFT")
+    bar.fill:SetSize(441, FILL_H)
+    bar.flare = bar.clip:CreateTexture(nil, "ARTWORK", nil, 2)
+    bar.flare:SetBlendMode("ADD")
+    bar.flare:SetSize(53, 16)
+    bar.flare:SetPoint("RIGHT", bar.clip, "RIGHT", 0, 0)
+    -- Everything drawn over the fill lives on a frame above the fill's clip frame.
+    bar.over = CreateFrame("Frame", nil, bar)
+    bar.over:SetAllPoints()
+    bar.over:SetFrameLevel(bar.clip:GetFrameLevel() + 1)
+    bar.frame = bar.over:CreateTexture(nil, "ARTWORK")
+    bar.frame:SetPoint("TOPLEFT")
+
+    -- Flipbook: plays once (2 s), then holds its last frame.
+    bar.anim = bar.fill:CreateAnimationGroup()
+    bar.anim:SetToFinalAlpha(true)
+    bar.flip = bar.anim:CreateAnimation("FlipBook")
+    bar.flip:SetDuration(2)
+    bar.flip:SetFlipBookColumns(2)
+
+    -- Text: the level, and the cue line (View trainers, ...) with short fading lines either side.
+    bar.text = bar.over:CreateFontString(nil, "OVERLAY", _G.Number12FontOutline and "Number12FontOutline" or "GameFontHighlightSmall")
+    bar.text:SetPoint("CENTER", bar, "TOPLEFT", 0, 0) -- placed in Layout: centered on the whole bar
+    bar.text:SetShadowOffset(1, -1)
+    bar.cue = CreateFrame("Frame", nil, bar)
+    bar.cue:SetPoint("TOPLEFT", bar, "TOPLEFT", 2, -3)
+    bar.cue:SetPoint("BOTTOMRIGHT", bar, "TOPRIGHT", -2, -3 - FILL_H)
+    bar.cue:SetFrameLevel(bar.over:GetFrameLevel() + 1)
+    bar.cue:SetAlpha(0)
+    bar.cueText = bar.cue:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    bar.cueText:SetPoint("CENTER")
+    bar.cueText:SetShadowOffset(1, -1)
+    local function CueLine(flip)
+        local t = bar.cue:CreateTexture(nil, "OVERLAY")
+        t:SetColorTexture(1, 1, 1, 1)
+        t:SetSize(22, 1)
+        if t.SetGradient and CreateColor then
+            local a, b = CreateColor(1, 1, 1, 0), CreateColor(1, 1, 1, 0.9)
+            if flip then t:SetGradient("HORIZONTAL", b, a) else t:SetGradient("HORIZONTAL", a, b) end
+        end
+        return t
+    end
+    bar.cueL, bar.cueR = CueLine(false), CueLine(true)
+    bar.cueL:SetPoint("RIGHT", bar.cueText, "LEFT", -8, 0)
+    bar.cueR:SetPoint("LEFT", bar.cueText, "RIGHT", 8, 0)
+
+    -- Hover glow: a faint colored edge around the bar.
+    -- Hover glow: the bar's own ornate frame drawn again on top, additive and tinted in the
+    -- profession's color, so the light follows the frame's shape instead of a hard box.
+    bar.glow = CreateFrame("Frame", nil, bar)
+    bar.glow:SetAllPoints()
+    bar.glow:SetFrameLevel(bar.over:GetFrameLevel() + 2)
+    bar.glow:SetAlpha(0)
+    bar.glowTex = bar.glow:CreateTexture(nil, "OVERLAY")
+    bar.glowTex:SetPoint("TOPLEFT")
+    bar.glowTex:SetBlendMode("ADD")
+
+    -- Ready-to-train pulse at a cap: the bar's right end and top line swell softly.
+    -- They live on their own frame, and the frame is what fades and pulses (gradient
+    -- textures in this client don't reliably follow their own alpha).
+    bar.capF = CreateFrame("Frame", nil, bar.over)
+    bar.capF:SetAllPoints()
+    bar.capF:Hide()
+    bar.capEdge = bar.capF:CreateTexture(nil, "OVERLAY", nil, 3)
+    bar.capEdge:SetBlendMode("ADD")
+    bar.capEdge:SetPoint("TOPRIGHT", bar, "TOPRIGHT", -7, -3)
+    bar.capEdge:SetHeight(FILL_H)
+    bar.capEdge:SetWidth(34)
+    bar.capLine = bar.capF:CreateTexture(nil, "OVERLAY", nil, 3)
+    bar.capLine:SetBlendMode("ADD")
+    bar.capLine:SetPoint("TOPLEFT", bar, "TOPLEFT", 8, -3)
+    bar.capLine:SetPoint("TOPRIGHT", bar, "TOPRIGHT", -7, -3)
+    bar.capLine:SetHeight(1)
+    bar.capPulse = bar.capF:CreateAnimationGroup()
+    bar.capPulse:SetLooping("REPEAT")
+    local up = bar.capPulse:CreateAnimation("Alpha")
+    up:SetFromAlpha(0.12); up:SetToAlpha(0.95); up:SetDuration(1.17); up:SetSmoothing("IN_OUT"); up:SetOrder(1)
+    local down = bar.capPulse:CreateAnimation("Alpha")
+    down:SetFromAlpha(0.95); down:SetToAlpha(0.12); down:SetDuration(1.43); down:SetSmoothing("IN_OUT"); down:SetOrder(2)
+
+    -- One-time gold flash when the panel opens and the next rank can be trained.
+    bar.flash = bar.over:CreateTexture(nil, "OVERLAY", nil, 4)
+    bar.flash:SetPoint("TOPLEFT", -4, 4)
+    bar.flash:SetPoint("BOTTOMRIGHT", 4, -4)
+    bar.flash:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 0.35)
+    bar.flash:SetBlendMode("ADD")
+    bar.flash:SetAlpha(0)
+
+    -- State ----------------------------------------------------------------------------
+    local kind, info, lastKind, lastRank
+    local flashed = {}      -- professions whose flash played this panel opening
+    local shimmerArmed = {} -- professions whose rank-line shimmer is waiting to be seen
+    local notice = false    -- the locked "Click again to hide" sequence is running
+    local timers = {}
+    local function Later(t, fn) timers[#timers + 1] = C_Timer.NewTimer(t, fn) end
+    local function CancelAll() for _, t in ipairs(timers) do t:Cancel() end timers = {} end
+
+    -- Instant swap to the cue text; or (text nil) fade the cue out fully, then the level is back at once.
+    local function ShowCue(text, outDur)
+        if text then
+            tweens[bar.text] = nil; tweens[bar.cue] = nil
+            bar.cueText:SetText(text)
+            bar.text:SetAlpha(0); bar.cue:SetAlpha(1)
+        else
+            FadeTo(bar.cue, 0, outDur or 0, function() bar.text:SetAlpha(1) end)
+        end
+    end
+    local function HoverText() return page.trainers and page.trainers.open and "Hide trainers" or "View trainers" end
+
+    -- Failsafe: stop everything and snap to the plain level text.
+    function H:Reset()
+        CancelAll()
+        notice = false
+        tweens[bar.cue] = nil; tweens[bar.text] = nil
+        bar.cue:SetAlpha(0); bar.text:SetAlpha(1)
+    end
+
+    -- Places the header for profession `k` and returns the height it takes.
+    function H:Layout(k, skillInfo)
+        local width = (frame.pageWidth or 300)
+        kind, info = k, skillInfo
+        local learned = skillInfo ~= nil
+
+        -- Art: the card's top-right corner, as tall as the header area.
+        CropAtlas(H.art, CARD_ATLAS[k], width + 2 * ART_PAD, ART_PAD + 36 + HEADER_H, 14, ART_DOWN[k])
+        H.art:SetDesaturated(not learned)
+        -- Fade in from the left; the strength is in the gradient itself (texture alpha isn't
+        -- reliable on gradient textures here).
+        local strength = learned and 1 or 0.6
+        H.art:SetAlpha(1)
+        if H.art.SetGradient and CreateColor then
+            -- Softer at the left (behind the title), full strength at the right.
+            -- Fully clear at its left edge, so the picture never shows a hard boundary (the panel is
+            -- see-through, so any edge shows up against the moving world behind it).
+            H.art:SetGradient("HORIZONTAL", CreateColor(1, 1, 1, 0), CreateColor(1, 1, 1, strength))
+        else
+            H.art:SetAlpha(strength)
+        end
+        H:FadeBottom(strength, not learned)
+
+        -- Bar.
+        bar:ClearAllPoints()
+        bar:SetPoint("TOPLEFT", pf, "TOPLEFT", 0, -32)
+        bar:SetWidth(width)
+        bar.bg:SetWidth(width - 4)
+        bar.text:ClearAllPoints()
+        bar.text:SetPoint("CENTER", bar, "TOPLEFT", width / 2, -3 - FILL_H / 2)
+        bar.frame:SetAtlas("Profession-ProgressBar-frame", true); bar.frame:SetWidth(width)
+        local v = learned and 1 or 0.7
+        bar.frame:SetVertexColor(v, v, v)
+
+        local fillAtlas = "Skillbar_Fill_Flipbook_" .. KIT[k]
+        local finfo = C_Texture.GetAtlasInfo(fillAtlas)
+        if finfo and bar.fillAtlas ~= fillAtlas then
+            bar.fillAtlas = fillAtlas
+            bar.fill:SetAtlas(fillAtlas, false)
+            local rows = math.max(1, math.floor(finfo.height / 34 + 0.5))
+            bar.flip:SetFlipBookRows(rows)
+            bar.flip:SetFlipBookFrames(rows * 2)
+            -- Show the flipbook's first frame straight away, so the bar is never blank (or the
+            -- whole sheet) for a frame before the animation takes over.
+            local l, r, t, b = finfo.leftTexCoord, finfo.rightTexCoord, finfo.topTexCoord, finfo.bottomTexCoord
+            bar.fill:SetTexCoord(l, l + (r - l) / 2, t, t + (b - t) / rows)
+        end
+        local flareAtlas = "Skillbar_Flare_" .. KIT[k]
+        if C_Texture.GetAtlasInfo(flareAtlas) then bar.flare:SetAtlas(flareAtlas, false); bar.flare:Show() else bar.flare:Hide() end
+
+        local inner = width - 4 -- 2px in from the frame on both ends
+        local ratio = learned and info.max > 0 and math.min(info.rank / info.max, 1) or 0
+        local target = math.max(1, inner * ratio)
+        local full = learned and info.rank >= info.max
+        local sameKind = lastKind == k
+        -- A skill-up while shown slides the fill (0.5 s ease-out) and, if it fills up, fades the
+        -- flare out over 1 s. Anything else (opening, switching) draws it in place at once.
+        if sameKind and lastRank and learned and info.rank > lastRank then
+            local from = bar.clip:GetWidth()
+            local t0 = GetTime()
+            bar:SetScript("OnUpdate", function(self)
+                local p = math.min((GetTime() - t0) / 0.5, 1)
+                local e = 1 - (1 - p) ^ 3
+                self.clip:SetWidth(from + (target - from) * e)
+                if p >= 1 then self:SetScript("OnUpdate", nil) end
+            end)
+            if full then FadeTo(bar.flare, 0, 1) else bar.flare:SetAlpha(1) end
+            bar.anim:Restart()
+        else
+            bar:SetScript("OnUpdate", nil)
+            bar.clip:SetWidth(target)
+            bar.flare:SetAlpha(full and 0 or 1)
+            if not sameKind then bar.anim:Restart() end
+        end
+        bar.clip:SetShown(learned)
+        lastKind, lastRank = k, learned and info.rank or nil
+
+        if learned then
+            bar.text:SetText(("%s %d/%d"):format(FN.kindNames[k], info.rank, info.max))
+            bar.text:SetTextColor(1, 1, 1)
+        else
+            bar.text:SetText(FN.kindNames[k] .. " \194\183 Not learned")
+            bar.text:SetTextColor(0.85, 0.83, 0.8)
+        end
+
+        local c = GLOW[k]
+        bar.glowTex:SetAtlas("Profession-ProgressBar-frame", true)
+        bar.glowTex:SetWidth(width)
+        bar.glowTex:SetVertexColor(c[1], c[2], c[3], learned and 0.9 or 0.5)
+        bar.capEdge:SetColorTexture(1, 1, 1, 1)
+        bar.capLine:SetColorTexture(1, 1, 1, 1)
+        if bar.capEdge.SetGradient and CreateColor then
+            bar.capEdge:SetGradient("HORIZONTAL", CreateColor(c[1], c[2], c[3], 0), CreateColor(1, 1, 1, 0.95))
+            bar.capLine:SetGradient("HORIZONTAL", CreateColor(c[1], c[2], c[3], 0), CreateColor(1, 1, 1, 0.9))
+        end
+
+        -- At a cap: pulse when the next rank can be trained, a steady dim glow when it can't yet.
+        local capped = learned and FN:IsCapped(k)
+        if capped and FN:CanTrain(k) then
+            bar.capF:Show(); bar.capLine:Show()
+            if not bar.capPulse:IsPlaying() then bar.capPulse:Play() end
+        else
+            bar.capPulse:Stop()
+            -- Can't train yet: a steady dim glow at the end only. Not capped: nothing.
+            bar.capF:SetShown(capped)
+            bar.capF:SetAlpha(0.22)
+            bar.capLine:Hide()
+        end
+        bar:Show()
+        return HEADER_H
+    end
+
+    -- Called when a profession's page is shown (panel opened or tab switched): replays the
+    -- fill and, once per profession per opening, the gold flash and the rank-line shimmer.
+    function H:Shown(k)
+        bar.anim:Restart()
+        if FN:GetSkillInfo(k) and FN:CanTrain(k) and not flashed[k] then
+            flashed[k] = true
+            shimmerArmed[k] = true
+            bar.flash:SetAlpha(1)
+            FadeTo(bar.flash, 0, 1.2)
+        end
+    end
+    function H:PanelOpened() flashed = {}; shimmerArmed = {} end
+    function H:Hide()
+        bar:Hide(); H.art:Hide(); bar.capPulse:Stop()
+        for _, t in ipairs(H.fade or {}) do t:Hide() end
+    end
+
+    -- The rank line the next rank removes shimmers once, the first time it is on screen.
+    function H:CheckShimmer()
+        local row = page.gateRow
+        if not (kind and shimmerArmed[kind] and row and row:IsShown()) then return end
+        local sf = page.scroll
+        local top, bottom = sf:GetTop(), sf:GetBottom()
+        local rt = row:GetTop()
+        if top and bottom and rt and rt <= top and rt >= bottom then
+            shimmerArmed[kind] = nil
+            row.shimmer:SetAlpha(0)
+            row.shimmer:Show()
+            FadeTo(row.shimmer, 1, 0.35, function() FadeTo(row.shimmer, 0, 1.05, function() row.shimmer:Hide() end) end)
+        end
+    end
+
+    -- Hover: instant swap to the cue; after leaving it holds 1 s, fades out 0.5 s, then the
+    -- level is back at once. Re-entering before that keeps it.
+    local leaveTimer
+    bar:SetScript("OnEnter", function(self)
+        self.hovered = true
+        FadeTo(self.glow, 1, 0.2)
+        if leaveTimer then leaveTimer:Cancel(); leaveTimer = nil end
+        if not notice then ShowCue(HoverText()) end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        H:FillTooltip(GameTooltip)
+        GameTooltip:Show()
+    end)
+    bar:SetScript("OnLeave", function(self)
+        self.hovered = false
+        FadeTo(self.glow, 0, 0.6)
+        GameTooltip:Hide()
+        if notice then return end
+        leaveTimer = C_Timer.NewTimer(1.0, function()
+            leaveTimer = nil
+            if not self.hovered and not notice then ShowCue(nil, 0.5) end
+        end)
+    end)
+
+    -- Click: open or close the trainer list. Opening plays a locked notice, one text at a time:
+    -- current text out 0.2 s, "Click again to hide" in 0.5 s, hold 1 s, out 0.5 s, then at once
+    -- "Hide trainers" if still hovered, otherwise the level. Clicking during it closes the list.
+    bar:SetScript("OnClick", function(self)
+        local T = page.trainers
+        if not (T and kind) then return end
+        if notice then
+            T:Close(); H:Reset()
+            if self.hovered then ShowCue("View trainers") end
+            return
+        end
+        if T.open then
+            T:Close()
+            if self.hovered then ShowCue("View trainers") else ShowCue(nil, 0) end
+            return
+        end
+        T:Open()
+        CancelAll()
+        notice = true
+        FadeTo(bar.cue, 0, 0.2); FadeTo(bar.text, 0, 0.2)
+        Later(0.2, function()
+            bar.cueText:SetText("Click again to hide")
+            FadeTo(bar.cue, 1, 0.5)
+        end)
+        Later(1.7, function() FadeTo(bar.cue, 0, 0.5) end)
+        Later(2.2, function()
+            notice = false
+            if self.hovered and T.open then ShowCue("Hide trainers") else bar.text:SetAlpha(1) end
+        end)
+    end)
+
+    -- Tooltip ----------------------------------------------------------------------------
+    function H:FillTooltip(tip)
+        if not kind then return end
+        local learnedInfo = FN:GetSkillInfo(kind)
+        local list, nxt = FN:TrainersFor(kind)
+        if not nxt then
+            tip:AddLine(FN.kindNames[kind] .. " \226\128\148 Artisan", 1, 1, 1)
+            tip:AddLine("Fully trained. Nothing left to learn.", 0.6, 0.6, 0.6)
+            return
+        end
+        tip:AddLine((learnedInfo and "Next: " or "Learn: ") .. nxt.name .. " " .. FN.kindNames[kind], 1, 1, 1)
+        if learnedInfo then
+            local ok = learnedInfo.rank >= nxt.skill
+            tip:AddDoubleLine("Requires " .. FN.kindNames[kind], tostring(nxt.skill), 0.6, 0.6, 0.6,
+                ok and 0.13 or 1, ok and 1 or 0.13, 0.13)
+        else
+            tip:AddDoubleLine("Requirements", "none", 0.6, 0.6, 0.6, 1, 1, 1)
+        end
+        if nxt.level > 0 then
+            local ok = UnitLevel("player") >= nxt.level
+            tip:AddDoubleLine("Requires level", tostring(nxt.level), 0.6, 0.6, 0.6, ok and 0.13 or 1, ok and 1 or 0.13, 0.13)
+        end
+        tip:AddDoubleLine("Your gold", Money(GetMoney()), 0.6, 0.6, 0.6, 1, 1, 1)
+        if #list > 0 then
+            tip:AddLine(" ")
+            local closest = list[1]
+            local low = Cheapest(list)
+            local cheapest
+            for _, t in ipairs(list) do
+                if t.cost == low and (not cheapest or (t.yards or 1e9) < (cheapest.yards or 1e9)) then cheapest = t end
+            end
+            local function Line(label, t)
+                local name = (REACTION[t.reaction] or "|cffffffff") .. t.name .. "|r"
+                local where = t.town ~= "" and t.town or t.zone
+                local price = Money(t.cost)
+                if t.cost > 0 and not Affordable(t.cost) then price = "|cffff2020" .. price .. "|r" end
+                tip:AddDoubleLine(label .. name .. " |cff9d9d9d\194\183 " .. where .. (t.yards and (" \194\183 " .. Yards(t.yards)) or "") .. "|r",
+                    price, 0.6, 0.6, 0.6, 1, 1, 1)
+            end
+            if closest == cheapest then Line("Closest & cheapest: ", closest)
+            else Line("Closest: ", closest); Line("Cheapest: ", cheapest) end
+            tip:AddLine(" ")
+            tip:AddLine(LMB .. " " .. (page.trainers and page.trainers.open and "Click the bar to hide the trainers"
+                or ("Click the bar for all " .. #list .. (#list == 1 and " trainer" or " trainers"))), 1, 0.82, 0)
+        end
+    end
+
+    function FN:OnRankTrained()
+        if page.trainers then page.trainers:Close() end
+        H:Reset()
+    end
+    return H
+end
+
+-- Trainer list --------------------------------------------------------------------------------
+-- Opens at the top of the node list's scroll area (pushing the nodes down). Columns:
+-- Trainer, Dist, Location, Price; sortable; Trainer and Dist widths drag-resizable and saved
+-- account-wide. Clicking a row pins that trainer on the map (click again to unpin).
+
+local TR_ROW = 22  -- fold lines
+local TR_ROW2 = 56 -- trainer cards (two lines plus a small gap)
+-- The trainer table is dense data, so it reads a size smaller than the node list.
+local function Smaller(fs, by)
+    local file, size, flags = fs:GetFont()
+    if file and size then fs:SetFont(file, math.max(8, size - (by or 1)), flags) end
+end
+local PRICE_W = 64
+local trainerSort = { by = "dist", dir = 1 } -- this session only (resets on reload)
+local LOC_DIM = "|cff8d8b86"
+
+-- Text that fits stays still; text that doesn't fades at its right edge and scrolls on hover.
+local function ScrollBox(parent)
+    local box = CreateFrame("Frame", nil, parent)
+    box:SetClipsChildren(true)
+    box.fs = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    box.fs:SetPoint("LEFT", 0, 0)
+    box.fs:SetWordWrap(false)
+    box.fs:SetJustifyH("LEFT")
+    Smaller(box.fs)
+    box.offset = 0
+    function box:SetText(t)
+        self.fs:SetText(t)
+        self:SetOffset(0)
+    end
+    function box:Overflow()
+        local w = self.fs.GetUnboundedStringWidth and self.fs:GetUnboundedStringWidth() or self.fs:GetStringWidth()
+        return math.max(0, w - self:GetWidth())
+    end
+    function box:Edge()
+        if not self.fs.SetAlphaGradient then return end
+        if self:Overflow() > 2 then
+            self.fs:SetAlphaGradient(math.max(0, math.floor(self.offset + self:GetWidth() - 18)), 18)
+        else
+            -- No fade: start it far past the end of any text (length must be above 0).
+            self.fs:SetAlphaGradient(4096, 1)
+        end
+    end
+    function box:SetOffset(x)
+        self.offset = x
+        self.fs:ClearAllPoints()
+        self.fs:SetPoint("LEFT", -x, 0)
+        self:Edge()
+    end
+    return box
+end
+
+-- One shared scroll timeline per row so the name and location move in sync: same start, same
+-- reading speed (42 px/s, cosine ease in 0.35 s / out 0.65 s), the shorter one waits, then
+-- both hold 0.85 s, fade out 0.26 s, return, fade in 0.26 s, pause 0.5 s, repeat.
+local MQ = { speed = 42, rampIn = 0.35, rampOut = 0.65, wait = 0.4, hold = 1.0, rest = 0.9, fade = 0.26, back = 0.25 }
+local function MqPos(t, dist)
+    local ti, to, v = MQ.rampIn, MQ.rampOut, MQ.speed
+    if v * (ti + to) / 2 > dist then v = dist / ((ti + to) / 2) end
+    local dIn, dOut = v * ti / 2, v * to / 2
+    local cruise = (dist - dIn - dOut) / v
+    local T = ti + cruise + to
+    if t <= ti then return v * (t / 2 - ti / (2 * math.pi) * math.sin(math.pi * t / ti)), T end
+    if t <= ti + cruise then return dIn + v * (t - ti), T end
+    local r = math.min(t - ti - cruise, to)
+    return math.min(dist, dIn + v * cruise + v * (r / 2 + to / (2 * math.pi) * math.sin(math.pi * r / to))), T
+end
+
+-- Hovered text that doesn't fit glides to its end, holds, glides back, rests, and repeats; it
+-- never fades out, so a name is always readable. Leaving glides it home.
+local function Glide(box, from, dur)
+    local t0 = GetTime()
+    box:SetScript("OnUpdate", function(self)
+        local k = math.min((GetTime() - t0) / dur, 1)
+        local e = 1 - (1 - k) * (1 - k)
+        self:SetOffset(from * (1 - e))
+        if k >= 1 then self:SetScript("OnUpdate", nil) end
+    end)
+end
+local function StartMarquee(row)
+    local items = {}
+    for _, box in ipairs({ row.nameBox, row.distBox, row.locBox }) do
+        -- Only text that doesn't fit is touched (text that fits keeps its alignment).
+        local d = box:IsShown() and box:Overflow() or 0
+        box:SetScript("OnUpdate", nil)
+        tweens[box.fs] = nil
+        box.fs:SetAlpha(1)
+        if d > 2 then
+            items[#items + 1] = { box = box, dist = d + 6, from = box.offset or 0 }
+        end
+    end
+    if #items == 0 then return end
+    local T = 0
+    for _, it in ipairs(items) do local _, t = MqPos(0, it.dist); T = math.max(T, t) end
+    local plan = { { "wait", MQ.wait }, { "scroll", T }, { "hold", MQ.hold }, { "back", T }, { "rest", MQ.rest } }
+    local i, t0 = 1, GetTime()
+    row:SetScript("OnUpdate", function()
+        local ph, dur = plan[i][1], plan[i][2]
+        local el = GetTime() - t0
+        local k = dur > 0 and math.min(el / dur, 1) or 1
+        for _, it in ipairs(items) do
+            if ph == "wait" then it.box:SetOffset(it.from * (1 - k))
+            elseif ph == "scroll" then it.box:SetOffset((MqPos(el, it.dist)))
+            elseif ph == "back" then it.box:SetOffset(it.dist - (MqPos(el, it.dist))) end
+        end
+        if k >= 1 then
+            i = i + 1; t0 = GetTime()
+            if i > #plan then i = 2; for _, it in ipairs(items) do it.from = 0 end end
+        end
+    end)
+end
+local function StopMarquee(row)
+    row:SetScript("OnUpdate", nil)
+    for _, box in ipairs({ row.nameBox, row.distBox, row.locBox }) do
+        tweens[box.fs] = nil
+        box.fs:SetAlpha(1)
+        if (box.offset or 0) ~= 0 then Glide(box, box.offset, MQ.back) end
+    end
+end
+
+local function BuildTrainers(page)
+    local L = { open = false, rows = {} }
+    page.trainers = L
+    local child = page.scroll.child
+
+    -- The whole trainer block sits in its own darker inset card with a bronze edge, so it
+    -- reads as a separate panel on top of the node list.
+    local card = CreateFrame("Frame", nil, child)
+    -- Nearly solid, so the moving world behind the see-through panel doesn't show through the
+    -- trainer list; the cards inside then need only light shading of their own.
+    card.bg = Rounded(card, "BACKGROUND", "round_fill"); card.bg:SetVertexColor(0.02, 0.02, 0.025, 0.88)
+    -- The edge is drawn on its own frame above the rows, so the row bands never cover it.
+    card.edgeF = CreateFrame("Frame", nil, card)
+    card.edgeF:SetAllPoints()
+    card.edgeF:SetFrameLevel(child:GetFrameLevel() + 20)
+    card.edge = Rounded(card.edgeF, "ARTWORK", "round_edge"); card.edge:SetVertexColor(TRIM[1], TRIM[2], TRIM[3], TRIM[4]) -- the same trim as the controls' edges
+    card.noFade = true -- the section's background stays; its rows fade
+    card:Hide()
+
+    -- Header: "Next rank:" small, the rank itself large in gold with the trainer count dim beside
+    -- it, a small "Pin to map" hint at the top, and the Dist | Price switch on the right.
+    -- A warmer panel up top with round top corners (a rounded fill, clipped at the bottom).
+    local HEAD_H, HEAD_LINE, HEAD_ROW3 = 56, 55, 53
+    local head = CreateFrame("Frame", nil, child)
+    head:SetHeight(HEAD_H)
+    head.clip = CreateFrame("Frame", nil, head)
+    head.clip:SetPoint("TOPLEFT", 0, 0); head.clip:SetPoint("BOTTOMRIGHT", head, "TOPRIGHT", 0, -HEAD_LINE)
+    head.clip:SetClipsChildren(true)
+    head.bg = head.clip:CreateTexture(nil, "BACKGROUND")
+    head.bg:SetTexture(FN.MEDIA .. "round_fill")
+    if head.bg.SetTextureSliceMargins then head.bg:SetTextureSliceMargins(10, 10, 10, 10) end
+    head.bg:SetPoint("TOPLEFT", 0, 0); head.bg:SetPoint("BOTTOMRIGHT", head.clip, "BOTTOMRIGHT", 0, -20)
+    head.bg:SetVertexColor(0.15, 0.125, 0.1, 0.92)
+    head.label = Label(head, "GameFontDisableSmall"); head.label:SetPoint("TOPLEFT", LIST_BLEED - 2, -6)
+    head.rank = Label(head, "GameFontNormalLarge"); head.rank:SetPoint("TOPLEFT", LIST_BLEED + 10, -20)
+    -- Third line: the trainer count and the pin hint sit on the header's bottom rule, which
+    -- breaks around them; the hint is centered.
+    head.count = Label(head, "GameFontDisableSmall"); head.count:SetPoint("LEFT", head, "TOPLEFT", LIST_BLEED + 11, -HEAD_ROW3)
+    head.hint = Label(head, "GameFontHighlightSmall", LMB .. " Pin to map"); head.hint:SetPoint("CENTER", head, "TOP", 0, -HEAD_ROW3)
+    head.hint:SetTextColor(0.6, 0.58, 0.55)
+    local function Rule()
+        local t = Fill(head, "BORDER", TRIM[1], TRIM[2], TRIM[3], TRIM[4]); t:SetHeight(1)
+        return t
+    end
+    local dy = HEAD_ROW3 - HEAD_LINE -- the rule sits just under the text's middle
+    head.ruleA, head.ruleB, head.ruleC = Rule(), Rule(), Rule()
+    head.ruleA:SetPoint("LEFT", head, "TOPLEFT", 1, -HEAD_LINE); head.ruleA:SetPoint("RIGHT", head.count, "LEFT", -5, dy)
+    head.ruleB:SetPoint("LEFT", head.count, "RIGHT", 5, dy); head.ruleB:SetPoint("RIGHT", head.hint, "LEFT", -5, dy)
+    head.ruleC:SetPoint("LEFT", head.hint, "RIGHT", 5, dy); head.ruleC:SetPoint("RIGHT", head, "TOPRIGHT", -1, -HEAD_LINE)
+    -- The rounded fill lives on a child frame (for the clipping), which would draw over the
+    -- header's own text: the text and rules move to a frame above it.
+    head.txt = CreateFrame("Frame", nil, head)
+    head.txt:SetAllPoints()
+    head.txt:SetFrameLevel(head:GetFrameLevel() + 2)
+    for _, rg in ipairs({ head.label, head.rank, head.count, head.hint, head.ruleA, head.ruleB, head.ruleC }) do
+        rg:SetParent(head.txt)
+    end
+    head.title = head.rank -- older code sets the title; the rank line carries it now
+    head.sort = PairToggle(head, "Dist", "Price", function()
+        trainerSort.by = trainerSort.by == "price" and "dist" or "price"
+        trainerSort.dir = 1
+        RefreshNodes()
+    end)
+    head.sort:SetPoint("TOPRIGHT", head, "TOPRIGHT", -(LIST_BLEED + 4 + 12), -17) -- centered on the rank's line
+    head.sort:SetFrameLevel(head:GetFrameLevel() + 3)
+
+    -- Sort bar: "SORT  Distance  Price  Name  Zone"; the active one is gold with an arrow.
+    local cols = CreateFrame("Frame", nil, child)
+    cols:SetHeight(16)
+    cols.bg = Fill(cols, "BACKGROUND", 0, 0, 0, 0.25); cols.bg:SetAllPoints()
+    cols.label = cols:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall"); Smaller(cols.label, 2)
+    cols.label:SetText("SORT")
+    local colButtons, colOrder = {}, {}
+    local function ColButton(key, text)
+        local b = CreateFrame("Button", nil, cols)
+        b:SetHeight(16)
+        b.fs = b:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        Smaller(b.fs, 1)
+        b.fs:SetPoint("LEFT", 0, 0)
+        b.label = text
+        b:SetScript("OnClick", function()
+            if trainerSort.by == key then trainerSort.dir = -trainerSort.dir else trainerSort.by, trainerSort.dir = key, 1 end
+            RefreshNodes()
+        end)
+        b:SetScript("OnEnter", function(self) if trainerSort.by ~= key then self.fs:SetTextColor(1, 1, 1) end end)
+        b:SetScript("OnLeave", function(self) if trainerSort.by ~= key then self.fs:SetTextColor(0.55, 0.55, 0.55) end end)
+        colButtons[key] = b
+        colOrder[#colOrder + 1] = key
+        return b
+    end
+    ColButton("dist", "Distance"); ColButton("price", "Price"); ColButton("name", "Name"); ColButton("zone", "Zone")
+
+    local hide = CreateFrame("Button", nil, child)
+    hide:SetHeight(28)
+    hide.clip = CreateFrame("Frame", nil, hide); hide.clip:SetAllPoints(); hide.clip:SetClipsChildren(true)
+    hide.bg = hide.clip:CreateTexture(nil, "BACKGROUND")
+    hide.bg:SetTexture(FN.MEDIA .. "round_fill")
+    if hide.bg.SetTextureSliceMargins then hide.bg:SetTextureSliceMargins(10, 10, 10, 10) end
+    hide.bg:SetPoint("TOPLEFT", hide, "TOPLEFT", 0, 20); hide.bg:SetPoint("BOTTOMRIGHT", 0, 0)
+    hide.bg:SetVertexColor(0, 0, 0, 0.6)
+    hide.top = Fill(hide, "BORDER", 1, 1, 1, 0.1); hide.top:SetHeight(1)
+    hide.top:SetPoint("TOPLEFT", 1, 0); hide.top:SetPoint("TOPRIGHT", -1, 0)
+    hide.fs = Label(hide, "GameFontDisableSmall", "Hide trainers"); hide.fs:SetPoint("CENTER", 0, 1)
+    hide.fs:SetTextColor(0.42, 0.42, 0.42)
+    local function SideLine(flip)
+        local t = hide:CreateTexture(nil, "OVERLAY")
+        t:SetColorTexture(1, 1, 1, 1); t:SetSize(26, 1)
+        if t.SetGradient and CreateColor then
+            local a, b = CreateColor(0.6, 0.6, 0.6, 0), CreateColor(0.6, 0.6, 0.6, 0.8)
+            if flip then t:SetGradient("HORIZONTAL", b, a) else t:SetGradient("HORIZONTAL", a, b) end
+        end
+        return t
+    end
+    hide.l, hide.r = SideLine(false), SideLine(true)
+    -- (The card's own edge closes the block off under this row.)
+    hide.l:SetPoint("RIGHT", hide.fs, "LEFT", -12, 0); hide.r:SetPoint("LEFT", hide.fs, "RIGHT", 12, 0)
+    hide:SetScript("OnEnter", function(self) self.fs:SetTextColor(GOLD[1], GOLD[2], GOLD[3]) end)
+    hide:SetScript("OnLeave", function(self) self.fs:SetTextColor(0.42, 0.42, 0.42) end)
+    hide:SetScript("OnClick", function() L:Close(); if page.header then page.header:Reset() end end)
+
+    L.folds, L.expanded = {}, {}
+    function L:NewFold(i)
+        local f = CreateFrame("Button", nil, child)
+        f:SetHeight(TR_ROW)
+        f.bg = Fill(f, "BACKGROUND", 1, 1, 1, 0.025); f.bg:SetAllPoints()
+        f.hl = f:CreateTexture(nil, "HIGHLIGHT"); f.hl:SetAllPoints(); f.hl:SetColorTexture(1, 1, 1, 0.06)
+        f.arrow = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"); f.arrow:SetPoint("LEFT", LIST_BLEED + 8, 0)
+        f.top = Fill(f, "BORDER", 1, 1, 1, 0.08); f.top:SetHeight(1)
+        f.top:SetPoint("TOPLEFT", 1, 0); f.top:SetPoint("TOPRIGHT", -1, 0)
+        f.fs = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall"); f.fs:SetPoint("LEFT", LIST_BLEED + 18, 0); Smaller(f.fs)
+        f.fs:SetTextColor(0.7, 0.68, 0.64)
+        f:SetScript("OnClick", function(self)
+            L.expanded[self.group] = not L.expanded[self.group] or nil
+            RefreshNodes()
+        end)
+        L.folds[i] = f
+        return f
+    end
+
+    -- A trainer as its own small card: name (with its distance) on top, location in a dim strip
+    -- underneath, and the price in a box on the right, vertically centered.
+    local CARD_L, CARD_R = LIST_BLEED + 4, LIST_BLEED + 4 -- card inset from the list's left edge / right edge
+    local function Row(i)
+        local r = L.rows[i]
+        if r then return r end
+        r = CreateFrame("Button", nil, child)
+        r:SetHeight(TR_ROW2)
+        local function Inset(t)
+            t:SetPoint("TOPLEFT", r, "TOPLEFT", CARD_L, -2)
+            t:SetPoint("BOTTOMRIGHT", r, "BOTTOMRIGHT", -CARD_R, 2)
+            return t
+        end
+        -- The profession's card art inside each trainer card (under the card's tint).
+        r.art = r:CreateTexture(nil, "BACKGROUND", nil, -2)
+        r.art:SetPoint("TOPRIGHT", r, "TOPRIGHT", -CARD_R, -2)
+        r.bg = Inset(r:CreateTexture(nil, "BACKGROUND"))
+        r.near = Inset(r:CreateTexture(nil, "BACKGROUND", nil, 1))
+        -- A raised face: a soft sheen on the upper half, a shade on the lower one.
+        r.sheen = r:CreateTexture(nil, "BACKGROUND", nil, 2)
+        r.sheen:SetPoint("TOPLEFT", r, "TOPLEFT", CARD_L, -2)
+        r.sheen:SetPoint("TOPRIGHT", r, "TOPRIGHT", -CARD_R, -2)
+        r.sheen:SetHeight((TR_ROW2 - 4) * 0.5)
+        r.sheen:SetColorTexture(1, 1, 1, 1)
+        r.shade = r:CreateTexture(nil, "BACKGROUND", nil, 2)
+        r.shade:SetPoint("BOTTOMLEFT", r, "BOTTOMLEFT", CARD_L, 2)
+        r.shade:SetPoint("BOTTOMRIGHT", r, "BOTTOMRIGHT", -CARD_R, 2)
+        r.shade:SetHeight((TR_ROW2 - 4) * 0.45)
+        r.shade:SetColorTexture(1, 1, 1, 1)
+        if CreateColor and r.sheen.SetGradient then
+            r.sheen:SetGradient("VERTICAL", CreateColor(1, 0.95, 0.85, 0), CreateColor(1, 0.95, 0.85, 0.07))
+            r.shade:SetGradient("VERTICAL", CreateColor(0, 0, 0, 0.32), CreateColor(0, 0, 0, 0))
+        else
+            r.sheen:Hide(); r.shade:Hide()
+        end
+        -- Hover: a warm glow over the face (added light, so the picture brightens under it).
+        r.hl = Inset(r:CreateTexture(nil, "HIGHLIGHT"))
+        r.hl:SetColorTexture(1, 1, 1, 1)
+        r.hl:SetBlendMode("ADD")
+        if r.hl.SetGradient and CreateColor then
+            r.hl:SetGradient("HORIZONTAL", CreateColor(1, 0.8, 0.45, 0.05), CreateColor(1, 0.8, 0.45, 0.14))
+        else
+            r.hl:SetVertexColor(1, 0.8, 0.45, 0.1)
+        end
+        -- Pressed: the face dips a little.
+        r.press = Inset(r:CreateTexture(nil, "BACKGROUND", nil, 3))
+        r.press:SetColorTexture(0, 0, 0, 0.22)
+        r.press:Hide()
+        r.edges = Outline(r, r.bg, BRONZE[1], BRONZE[2], BRONZE[3], 0) -- kept hidden; the ornate frame below is the edge
+        -- The card's edge is the skill bar's own ornate frame, sliced so its corners keep their
+        -- shape at the card's height (stretched as a whole where slicing isn't available).
+        r.frameF = CreateFrame("Frame", nil, r)
+        r.frameF:SetPoint("TOPLEFT", r.bg, "TOPLEFT", -2, 2)
+        r.frameF:SetPoint("BOTTOMRIGHT", r.bg, "BOTTOMRIGHT", 2, -2)
+        r.frameF:SetFrameLevel(r:GetFrameLevel() + 2)
+        r.frame = r.frameF:CreateTexture(nil, "ARTWORK")
+        r.frame:SetAllPoints()
+        r.frame:SetAtlas("Profession-ProgressBar-frame", false)
+        if r.frame.SetTextureSliceMargins then
+            r.frame:SetTextureSliceMargins(18, 10, 18, 10)
+            if r.frame.SetTextureSliceMode and Enum and Enum.UITextureSliceMode then
+                r.frame:SetTextureSliceMode(Enum.UITextureSliceMode.Stretched)
+            end
+        end
+        -- The pinned trainer's card gets a gold edge on its left.
+        r.pinEdge = Fill(r, "ARTWORK", GOLD[1], GOLD[2], GOLD[3], 0.9)
+        r.pinEdge:SetWidth(2)
+        r.pinEdge:SetPoint("TOPLEFT", r.bg, "TOPLEFT", 0, 0); r.pinEdge:SetPoint("BOTTOMLEFT", r.bg, "BOTTOMLEFT", 0, 0)
+        r.pinEdge:Hide()
+        r.line = Fill(r, "BORDER", 1, 1, 1, 0); r.line:SetHeight(1)
+        r.line:SetPoint("TOPLEFT"); r.line:SetPoint("TOPRIGHT")
+        -- The pinned trainer: the game's map pin sitting on the card's left edge, drawn on its
+        -- own layer above the card so it overlaps the border.
+        r.pinF = CreateFrame("Frame", nil, r)
+        r.pinF:SetSize(18, 18)
+        r.pinF:SetFrameLevel(r:GetFrameLevel() + 5)
+        r.pin = r.pinF:CreateTexture(nil, "OVERLAY")
+        r.pin:SetAllPoints()
+        if r.pin.SetAtlas then r.pin:SetAtlas("Waypoint-MapPin-Tracked") end
+        r.pin:Hide()
+
+        r.nameBox = ScrollBox(r)
+        r.nameBox.fs:SetFontObject("GameFontNormal") -- the name reads a size up
+        do local f, sz, fl = r.nameBox.fs:GetFont(); if f then r.nameBox.fs:SetFont(f, sz + 4.5, fl) end end
+        -- Location strip.
+        r.locBg = r:CreateTexture(nil, "BORDER"); r.locBg:Hide() -- no inner boxes inside the card
+        r.locBg:SetColorTexture(0, 0, 0, 0.28)
+        r.locBox = ScrollBox(r)
+        r.locBox.fs:SetFontObject("GameFontHighlight") -- a touch over normal size, a step under the name
+        do local f, sz, fl = r.locBox.fs:GetFont(); if f then r.locBox.fs:SetFont(f, sz + 0.5, fl) end end
+        -- Kept for older layouts; unused in the card rows.
+        r.distBox = ScrollBox(r); r.distBox:Hide()
+        -- The distance: its own smaller, dim text just after the name.
+        r.distF = CreateFrame("Frame", nil, r); r.distF:SetSize(1, 1)
+        r.dist = r.distF:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        r.dist:SetTextColor(0.55, 0.54, 0.51); r.dist:SetWordWrap(false); Smaller(r.dist)
+
+        -- Price box.
+        r.priceBox = CreateFrame("Frame", nil, r)
+        r.priceBox:SetHeight(24)
+        -- (No box drawn around the price: just the coins, right-aligned and centered.)
+        r.price = r.priceBox:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        r.price:SetPoint("RIGHT", 0, 0)
+        -- Text and the price box sit above the ornate frame.
+        for _, f in ipairs({ r.nameBox, r.locBox, r.priceBox, r.distF }) do f:SetFrameLevel(r:GetFrameLevel() + 3) end
+
+        -- The frame lights up while hovered, back to its own tint after.
+        local function FrameTint(self, lit)
+            local c = self.frameTint or { 0.8, 0.8, 0.8 }
+            local m = lit and 1.25 or 1
+            self.frame:SetVertexColor(math.min(1, c[1] * m), math.min(1, c[2] * m), math.min(1, c[3] * m))
+        end
+        r:SetScript("OnEnter", function(self) FrameTint(self, true); StartMarquee(self) end)
+        r:SetScript("OnLeave", function(self) FrameTint(self, false); self.press:Hide(); StopMarquee(self) end)
+        r:SetScript("OnMouseDown", function(self) self.press:Show() end)
+        r:SetScript("OnMouseUp", function(self) self.press:Hide() end)
+        r:SetScript("OnClick", function(self) FN:TogglePin(self.t, L.kind) end)
+        L.rows[i] = r
+        return r
+    end
+
+    function L:Place()
+        local w = L.width or 300
+        local innerL = CARD_L + 14
+        local right = w + LIST_BLEED - CARD_R - 12
+        for _, r in ipairs(L.rows) do
+            local pw = math.ceil(r.price:GetStringWidth()) + 6
+            r.priceBox:SetWidth(pw)
+            r.priceBox:ClearAllPoints(); r.priceBox:SetPoint("RIGHT", r, "LEFT", right, 0)
+            r.pinF:ClearAllPoints(); r.pinF:SetPoint("CENTER", r, "LEFT", CARD_L, 0) -- centered on the card's left edge
+            local textRight = right - pw - 10
+            -- Name, then its distance right after it; a long name gives way to the distance.
+            local fs = r.nameBox.fs
+            local nw = math.ceil(fs.GetUnboundedStringWidth and fs:GetUnboundedStringWidth() or fs:GetStringWidth())
+            local dw = (r.dist:GetText() or "") ~= "" and math.ceil(r.dist:GetStringWidth()) + 6 or 0
+            local avail = textRight - innerL
+            local boxW = math.max(20, math.min(nw + 2, avail - dw))
+            r.nameBox:ClearAllPoints(); r.nameBox:SetPoint("TOPLEFT", r, "TOPLEFT", innerL, -8)
+            r.nameBox:SetSize(boxW, 21)
+            r.distF:ClearAllPoints(); r.distF:SetPoint("TOPLEFT", r, "TOPLEFT", innerL + math.min(nw, boxW) + 6, -8)
+            r.dist:ClearAllPoints(); r.dist:SetPoint("BOTTOMLEFT", r.distF, "TOPLEFT", 0, -18)
+            local locX = innerL + 8
+            r.locBox:ClearAllPoints(); r.locBox:SetPoint("TOPLEFT", r, "TOPLEFT", locX, -30)
+            r.locBox:SetSize(math.max(20, textRight - locX), 17)
+            r.locBg:ClearAllPoints()
+            r.locBg:SetPoint("TOPLEFT", r, "TOPLEFT", locX - 4, -26)
+            r.locBg:SetPoint("BOTTOMRIGHT", r, "TOPLEFT", textRight + 2, -42)
+            -- Art: the card picture's top-right corner, sized to this card, fading in from the left.
+            local cw, ch = w + LIST_BLEED - CARD_R - CARD_L, TR_ROW2 - 4
+            if L.kind then
+                CropAtlas(r.art, CARD_ATLAS[L.kind], cw, ch, 14, ART_DOWN[L.kind])
+                r.art:SetAlpha(1)
+                if r.art.SetGradient and CreateColor then
+                    r.art:SetGradient("HORIZONTAL", CreateColor(1, 1, 1, 0.22), CreateColor(1, 1, 1, 0.95))
+                end
+            end
+            r.nameBox:Edge(); r.locBox:Edge()
+        end
+    end
+
+    -- While open, distances follow you: twice a second, and a row's text only changes when its
+    -- shown value does (every yard under 1000, every 1000 above). Hovered rows wait, so their
+    -- scrolling text isn't reset.
+    local function NameText(r, yards)
+        local t = r.t
+        return (REACTION[t.reaction] or "|cffffffff") .. t.name .. "|r"
+    end
+    local function DistText(r, yards)
+        local where = yards and Yards(yards) or r.where
+        return where and ("(" .. where .. ")") or ""
+    end
+    L.DistText = DistText
+    L.NameText = NameText
+    local function Tick()
+        if not L.open then return end
+        for _, r in ipairs(L.rows) do
+            if r:IsShown() and r.t and r.t.wx and not r:IsMouseOver() then
+                local yards = FN:TrainerYards(r.t)
+                local text = DistText(r, yards)
+                if text ~= r.distText then
+                    r.distText = text; r.dist:SetText(text)
+                    L:Place()
+                end
+            end
+        end
+    end
+    function L:Open()
+        L.open = true
+        if not L.ticker then L.ticker = C_Timer.NewTicker(0.5, Tick) end
+        RefreshNodes()
+    end
+    function L:Close()
+        if not L.open then return end
+        L.open = false
+        if L.ticker then L.ticker:Cancel(); L.ticker = nil end
+        for _, r in ipairs(L.rows) do r:SetScript("OnUpdate", nil) end
+        RefreshNodes()
+    end
+
+    -- Draws the list for `kind` at the top of the scroll area; returns its height (0 when closed).
+    function L:Layout(kind, width)
+        -- The section spans exactly what the skill bar does (the page's own width), starting at
+        -- the page's left edge; inner offsets stay measured from the section's own left edge.
+        width = (width or 300) - LIST_BLEED
+        local shown = L.open and kind ~= nil
+        local list, nxt
+        if shown then list, nxt = FN:TrainersFor(kind) end
+        if shown and not nxt then L.open = false; shown = false end
+        -- No sort bar: two-line rows have no columns to sort, so the list is always nearest first.
+        head:SetShown(shown); cols:Hide(); hide:SetShown(shown); card:SetShown(shown)
+        if not shown then
+            for _, r in ipairs(L.rows) do r:Hide() end
+            for _, f in ipairs(L.folds) do f:Hide() end -- the continent lines go with the list
+            return 0
+        end
+        L.kind, L.width = kind, width
+        local learnedInfo = FN:GetSkillInfo(kind)
+        head.label:SetText(learnedInfo and "Next rank:" or "Learn:")
+        head.rank:SetText(nxt.name)
+        head.count:SetText(#list .. (#list == 1 and " trainer" or " trainers"))
+
+        -- Highlights: every trainer at the lowest price (green row and price), the closest one
+        -- (soft white row); both get brighter location and distance text.
+        local low = Cheapest(list)
+        local closest = list[1]
+        if trainerSort.by ~= "dist" or trainerSort.dir ~= 1 then
+            local key = trainerSort.by
+            table.sort(list, function(a, b)
+                local x, y
+                if key == "name" then x, y = a.name, b.name
+                elseif key == "zone" then x, y = a.zone .. a.town, b.zone .. b.town
+                elseif key == "price" then x, y = a.cost, b.cost
+                else x, y = a.yards or 1e9, b.yards or 1e9 end
+                if x == y then return a.name < b.name end
+                if trainerSort.dir > 0 then return x < y else return x > y end
+            end)
+        end
+
+        local y = 0
+        -- Every band (title, columns, rows, Hide) spans the same width: pane border to the right edge.
+        head:ClearAllPoints(); head:SetPoint("TOPLEFT", child, "TOPLEFT", LIST_BLEED, -y); head:SetWidth(width + LIST_BLEED); y = y + 65
+        head.sort:SetRight(trainerSort.by == "price")
+        local pinned = FN:PinnedTrainer()
+        -- Distance sort: trainers on other continents fold away under one line per continent
+        -- ("Kalimdor · 5 trainers"), closed by default, so the list starts with what's reachable.
+        local fold = trainerSort.by == "dist" and trainerSort.dir == 1
+        local n, nf, zebra = 0, 0, false
+        local lastGroup
+        for _, t in ipairs(list) do
+            local group = t.yards and "here" or t.continent
+            if fold and t.yards == nil and group ~= lastGroup then
+                nf = nf + 1
+                local f = L.folds[nf] or L:NewFold(nf)
+                local count = 0
+                for _, o in ipairs(list) do if o.yards == nil and o.continent == group then count = count + 1 end end
+                f.group = group
+                f:ClearAllPoints(); f:SetPoint("TOPLEFT", child, "TOPLEFT", LIST_BLEED, -y); f:SetWidth(width + LIST_BLEED)
+                local open = L.expanded[group]
+                f.fs:SetText(group .. "  |cff6f6d68\194\183  " .. count .. (count == 1 and " trainer" or " trainers") .. "|r")
+                f.arrow:SetText(open and "\226\128\147" or "+")
+                f:Show()
+                y = y + TR_ROW
+                zebra = false
+            end
+            lastGroup = group
+            if not (fold and t.yards == nil and not L.expanded[group]) then
+                n = n + 1
+                local r = Row(n)
+                r.t = t
+                r:ClearAllPoints(); r:SetPoint("TOPLEFT", child, "TOPLEFT", LIST_BLEED, -y); r:SetWidth(width + LIST_BLEED)
+                local cheap, near = t.cost == low, t == closest
+                -- Card fill: green-tinted for the cheapest, otherwise dark.
+                r.bg:SetColorTexture(1, 1, 1, 1)
+                if r.bg.SetGradient and CreateColor then
+                    if cheap then
+                        r.bg:SetGradient("HORIZONTAL", CreateColor(0.18, 0.55, 0.18, 0.22), CreateColor(0.25, 0.75, 0.25, 0.22))
+                    else
+                        r.bg:SetGradient("HORIZONTAL", CreateColor(0.05, 0.04, 0.03, 0.30), CreateColor(0, 0, 0, 0))
+                    end
+                end
+                r.near:SetColorTexture(1, 1, 1, 1)
+                if r.near.SetGradient and CreateColor then
+                    r.near:SetGradient("HORIZONTAL", CreateColor(1, 1, 1, near and 0.03 or 0), CreateColor(1, 1, 1, near and 0.08 or 0))
+                end
+                -- Frame tint: green for the cheapest, a touch brighter for the closest.
+                r.frameTint = cheap and { 0.55, 1, 0.55 } or near and { 1, 1, 1 } or { 0.8, 0.8, 0.8 }
+                local lit = r:IsMouseOver() and 1.25 or 1
+                r.frame:SetVertexColor(math.min(1, r.frameTint[1] * lit), math.min(1, r.frameTint[2] * lit), math.min(1, r.frameTint[3] * lit))
+                r.line:SetColorTexture(1, 1, 1, 0)
+                zebra = not zebra
+
+                r.pin:SetShown(pinned == t.name)
+                r.pinEdge:Hide() -- the pin icon on the edge marks it now
+                -- Name (reaction color) with its distance, or its continent when far away, dim after it.
+                r.where = (not t.yards and not fold) and t.continent or nil
+                r.nameText = L.NameText(r, t.yards)
+                r.nameBox:SetText(r.nameText)
+                r.distText = L.DistText(r, t.yards); r.dist:SetText(r.distText)
+                local bright = cheap or near
+                r.locBox:SetText(t.zone .. (t.town ~= "" and (" " .. LOC_DIM .. "(" .. t.town .. ")|r") or ""))
+                if bright then r.locBox.fs:SetTextColor(0.86, 0.85, 0.82) else r.locBox.fs:SetTextColor(0.62, 0.6, 0.56) end
+                -- The game's coin icons, in their box. Red when you can't afford it, green for the cheapest.
+                local price = Money(t.cost)
+                if t.cost > 0 and not Affordable(t.cost) then price = "|cffff3030" .. price .. "|r"
+                elseif t.cost > 0 and cheap then price = "|cff40ff40" .. price .. "|r" end
+                r.price:SetText(price)
+                r:Show()
+                y = y + TR_ROW2
+            end
+        end
+        for i = nf + 1, #L.folds do L.folds[i]:Hide() end
+        for i = n + 1, #L.rows do L.rows[i]:Hide() end
+        hide:ClearAllPoints(); hide:SetPoint("TOPLEFT", child, "TOPLEFT", LIST_BLEED, -y); hide:SetWidth(width + LIST_BLEED); y = y + 28
+        card:ClearAllPoints()
+        card:SetPoint("TOPLEFT", child, "TOPLEFT", LIST_BLEED, 0)
+        card:SetSize(width + LIST_BLEED, y)
+        L:Place()
+        return y + 10 -- a little air before the node list starts
+    end
+    return L
 end
 
 local function BuildNodesPage(page)
@@ -812,9 +2129,10 @@ local function BuildNodesPage(page)
     nodesPage.rule = Fill(page, "ARTWORK", BRONZE[1], BRONZE[2], BRONZE[3], 0.35)
     nodesPage.rule:SetHeight(1)
     nodesPage.scroll = Scroller(page)
+    nodesPage.scroll.fadeTop = 16
 
     nodesPage.empty = Label(page, "GameFontDisable",
-        "This character has no gathering profession.\n\nTurn off \"Lock professions I don't have\" under Settings > Professions to see every node.")
+        "This character has no gathering profession.\n\nTurn on \"Allow access to unlearned professions\" under Settings > Professions to see every node.")
     nodesPage.fishNote = Label(page, "GameFontDisableSmall",
         "")
     -- "equipped" is green while a pole is in hand, red otherwise: a quick check that the addon sees it.
@@ -829,6 +2147,11 @@ local function BuildNodesPage(page)
     nodesPage.empty:SetPoint("TOPLEFT", 10, -120)
     nodesPage.empty:SetPoint("TOPRIGHT", -10, -120)
 
+    BuildHeader(nodesPage)
+    BuildTrainers(nodesPage)
+    -- The rank-line shimmer plays the first time its line scrolls into view.
+    nodesPage.scroll:HookScript("OnMouseWheel", function() nodesPage.header:CheckShimmer() end)
+    function nodesPage:OnListDrawn() self.header:CheckShimmer() end
 end
 
 -- Settings page ----------------------------------------------------------------
@@ -1138,8 +2461,10 @@ local function BuildSettingsPage(columnA, columnB)
     Slider(page, "Icon size", 8, 32, 1, "%d", LookNumber("size")):SetPoint("TOPLEFT", 0, -84)
 
     -- Colors -------------------------------------------------------------------
-    -- Professions: each one's color, and whether ones the character lacks can be opened.
-    _, page = Add(sectionsA, columnA, "colors", "Professions", 94)
+    -- Professions: each one's color, what shows when, and (folded) how the lists look.
+    local profSection
+    profSection, page = Add(sectionsA, columnA, "colors", "Professions", 124)
+    local profPage = page
     local note = Label(page, "GameFontDisableSmall", "Shared by the circle and the dot.")
     note:SetPoint("TOPLEFT", 0, 0)
     Swatch(page, "Herbs", function() return db.colors.herb end):SetPoint("TOPLEFT", 0, -20)
@@ -1152,27 +2477,215 @@ local function BuildSettingsPage(columnA, columnB)
         local function Byte(v) return math.floor((v or 1) * 255 + 0.5) end
         return ("%02x%02x%02x"):format(Byte(c[1]), Byte(c[2]), Byte(c[3]))
     end
+    local DIM = "|cff8d8b86"
     -- Herbs need Find Herbs on and ore Find Minerals (characters without the spell see them anyway).
-    local tracked = Check(page, "Only show herbs/ore when tracked",
+    local tracked = Check(page, "(Herbs/Ore) Only while tracking",
         function() return db.onlyTracked end,
         function(v)
             db.onlyTracked = v and true or false
             FN:Refresh()
         end)
     tracked:SetPoint("TOPLEFT", 0, -50)
-    local function PaintTracked()
-        tracked:SetLabel("Only show |cff" .. Hex("herb") .. "herbs|r/|cff" .. Hex("ore") .. "ore|r when tracked")
-    end
-    syncers[#syncers + 1] = PaintTracked
-    recordLabels[#recordLabels + 1] = PaintTracked
-    -- Professions the character lacks are always listed, greyed out; ticked (the default)
-    -- they cannot be opened. The saved setting is the other way round (showAll).
-    Check(page, "Lock professions I don't have",
-        function() return not db.showAll end,
+    -- Pools only show while a fishing pole is equipped (off: always).
+    local pole = Check(page, "(Fish pools) Only while pole equipped",
+        function() return db.onlyPole end,
         function(v)
-            db.showAll = not v
-            FN:RefreshOptions()
-        end):SetPoint("TOPLEFT", 0, -74)
+            db.onlyPole = v and true or false
+            FN:Refresh()
+            RefreshNodes()
+        end)
+    pole:SetPoint("TOPLEFT", 0, -74)
+    local function PaintProf()
+        tracked:SetLabel(DIM .. "(|r|cff" .. Hex("herb") .. "Herbs|r" .. DIM .. "/|r|cff" .. Hex("ore") .. "Ore|r" .. DIM .. ")|r Only while tracking")
+        pole:SetLabel(DIM .. "(|r|cff" .. Hex("fish") .. "Fish pools|r" .. DIM .. ")|r Only while pole equipped")
+    end
+    syncers[#syncers + 1] = PaintProf
+    recordLabels[#recordLabels + 1] = PaintProf
+
+    -- "Appearance & Behavior": a fold like Advanced Minimap Settings (closed each time).
+    local profLine = Stock() and Fill(page, "ARTWORK", 0.20, 0.13, 0.07, 0.85) or Fill(page, "ARTWORK", 1, 1, 1, 0.10)
+    profLine:SetHeight(1)
+    local fold = CreateFrame("Button", nil, page)
+    fold:SetSize(220, 20)
+    local foldText = Label(fold, "GameFontDisable", "Appearance & Behavior")
+    foldText:SetPoint("CENTER")
+    fold:SetScript("OnEnter", function() foldText:SetTextColor(GOLD[1], GOLD[2], GOLD[3]) end)
+    fold:SetScript("OnLeave", function() foldText:SetTextColor(0.5, 0.5, 0.5) end)
+    local foldOpen = false
+
+    -- The gradient on "difficulty coloring": grey, green, yellow, orange, red, letter by letter.
+    local function Gradient(text)
+        local stops = { { 0.62, 0.62, 0.62 }, { 0.25, 0.75, 0.25 }, { 1, 1, 0 }, { 1, 0.5, 0.25 }, { 1, 0.13, 0.13 } }
+        local out, n = {}, #text
+        for i = 1, n do
+            local p = (n > 1) and (i - 1) / (n - 1) * (#stops - 1) or 0
+            local a = math.floor(p) + 1
+            local b = math.min(a + 1, #stops)
+            local f = p - (a - 1)
+            local c = {}
+            for j = 1, 3 do c[j] = stops[a][j] + (stops[b][j] - stops[a][j]) * f end
+            out[#out + 1] = ("|cff%02x%02x%02x%s|r"):format(math.floor(c[1] * 255), math.floor(c[2] * 255), math.floor(c[3] * 255), text:sub(i, i))
+        end
+        return table.concat(out)
+    end
+
+    local foldChecks = {
+        Check(page, DIM .. "(Lvl sort)|r Separate nodes by profession tier",
+            function() return db.cutoffs end,
+            function(v) db.cutoffs = v and true or false; RefreshNodes() end),
+        Check(page, DIM .. "(A-Z sort)|r Show nodes beyond my profession tier",
+            function() return db.azShowBeyond end,
+            function(v) db.azShowBeyond = v and true or false; RefreshNodes() end),
+        Check(page, DIM .. "(|r|cffffd100Skill 300|r" .. DIM .. ")|r Mute " .. Gradient("difficulty coloring") .. " " .. DIM .. "(doesn't affect tooltips)|r",
+            function() return db.muteAtMax end,
+            function(v) db.muteAtMax = v and true or false; RefreshNodes() end),
+        Check(page, "Allow access to unlearned professions",
+            function() return db.showAll end,
+            function(v) db.showAll = v and true or false; FN:RefreshOptions() end),
+    }
+
+    local function LayoutProf()
+        local y = 100
+        profLine:ClearAllPoints()
+        profLine:SetPoint("TOPLEFT", profPage, "TOPLEFT", -SECTION_INSET, -(y - 2))
+        profLine:SetPoint("TOPRIGHT", profPage, "TOPRIGHT", SECTION_INSET, -(y - 2))
+        fold:ClearAllPoints()
+        fold:SetPoint("TOP", profPage, "TOP", 0, -(y + 3))
+        y = y + (foldOpen and 32 or 30)
+        for _, c in ipairs(foldChecks) do
+            c:SetShown(foldOpen)
+            if foldOpen then
+                c:ClearAllPoints()
+                c:SetPoint("TOPLEFT", 0, -y)
+                y = y + 24
+            end
+        end
+        profSection.height = y - 6
+    end
+    fold:SetScript("OnClick", function()
+        foldOpen = not foldOpen
+        LayoutProf()
+        Relayout(true)
+    end)
+    profPage:HookScript("OnHide", function()
+        if foldOpen then foldOpen = false; LayoutProf() end
+    end)
+    syncers[#syncers + 1] = LayoutProf
+
+    -- Tooltips -----------------------------------------------------------------
+    -- World map and overworld tooltips, and the style of the added level.
+    local tipSection
+    tipSection, page = Add(sectionsA, columnA, "tooltips", "Tooltips", 190)
+    local tipPage = page
+    Check(page, "World map tooltips",
+        function() return db.tipWorldMap end,
+        function(v) db.tipWorldMap = v and true or false; FN:Refresh() end):SetPoint("TOPLEFT", 0, 0)
+    Check(page, "Overworld tooltips",
+        function() return db.tipOverworld end,
+        function(v) db.tipOverworld = v and true or false end):SetPoint("TOPLEFT", 0, -24)
+
+    local SAMPLE = { name = "Liferoot", skill = 150, kind = "herb" }
+    -- A sample line drawn in a given color mode, using the current brackets and position.
+    local function Sample(mode, node, r, g, b)
+        node = node or SAMPLE
+        local c = ("|cff%02x%02x%02x"):format(math.floor((r or 1) * 255), math.floor((g or 0.5) * 255), math.floor((b or 0.25) * 255))
+        local open, close = "", ""
+        if db.tipBrackets == "square" then open, close = "[", "]" elseif db.tipBrackets == "round" then open, close = "(", ")" end
+        local lvl = tostring(node.skill)
+        local num
+        if mode == "level" then num = open .. c .. lvl .. "|r" .. close
+        elseif mode == "brackets" then num = c .. open .. lvl .. close .. "|r"
+        else num = open .. lvl .. close end
+        local nm = mode == "name" and (c .. node.name .. "|r") or node.name
+        if mode == "line" then
+            return c .. (db.tipPosition == "after" and (node.name .. " " .. open .. lvl .. close) or (open .. lvl .. close .. " " .. node.name)) .. "|r"
+        end
+        return db.tipPosition == "after" and (nm .. " " .. num) or (num .. " " .. nm)
+    end
+
+    local BRACKETS = { { "none", "150" }, { "square", "[ 150 ]" }, { "round", "( 150 )" } }
+    local POSITIONS = { { "before", "Before name" }, { "after", "After name" } }
+    local COLORS = { { "level", "Level only" }, { "brackets", "Level and brackets" }, { "name", "Name only" },
+        { "line", "Whole line" }, { "none", "None" } }
+    local function LabelOf(list, v) for _, e in ipairs(list) do if e[1] == v then return e[2] end end return list[1][2] end
+
+    local preview
+    local function UpdateTips()
+        if preview then
+            preview[1]:SetText(Sample(db.tipColor, { name = "Peacebloom", skill = 1 }, 0.5, 0.5, 0.5))
+            preview[2]:SetText(Sample(db.tipColor, SAMPLE, 1, 0.5, 0.25))
+            preview[3]:SetText(Sample(db.tipColor, { name = "Khadgar's Whisker", skill = 185 }, 1, 0.13, 0.13))
+        end
+    end
+
+    -- A dropdown button; the menu uses the game's own menus when available (colored entries work).
+    local function Dropdown(width, entries, getValue, setValue, labelFor)
+        local b = Card(page, "", width, 22, nil)
+        local function Refresh() b.text:SetText(labelFor and labelFor(getValue()) or LabelOf(entries, getValue())) end
+        b:SetScript("OnClick", function(self)
+            -- Clicking the button while its menu is open just closes it. (The click itself can
+            -- already have closed the menu by the time we get here: a menu that closed a moment
+            -- ago counts as "was open".)
+            if self.menu and self.menu:IsShown() then
+                self.menu:Hide()
+                self.menu = nil
+                return
+            end
+            if self.menuClosedAt and GetTime() - self.menuClosedAt < 0.25 then
+                self.menuClosedAt = nil
+                return
+            end
+            if MenuUtil and MenuUtil.CreateContextMenu then
+                self.menu = MenuUtil.CreateContextMenu(self, function(_, root)
+                    for _, e in ipairs(entries) do
+                        local text = labelFor and (labelFor(e[1]) .. "  |cff8d8b86" .. e[2] .. "|r") or e[2]
+                        root:CreateRadio(text, function() return getValue() == e[1] end,
+                            function() setValue(e[1]); Refresh(); UpdateTips() end)
+                    end
+                end)
+                local menu = self.menu
+                if menu and menu.HookScript then
+                    menu:HookScript("OnHide", function()
+                        if self.menu == menu then self.menu = nil; self.menuClosedAt = GetTime() end
+                    end)
+                end
+            else
+                -- No menu system: step through the choices.
+                local i = 1
+                for n, e in ipairs(entries) do if e[1] == getValue() then i = n end end
+                setValue(entries[i % #entries + 1][1]); Refresh(); UpdateTips()
+            end
+        end)
+        syncers[#syncers + 1] = Refresh
+        return b
+    end
+
+    local levelLabel = Label(page, nil, "Level")
+    levelLabel:SetPoint("TOPLEFT", 0, -58)
+    local bracketsDD = Dropdown(80, BRACKETS, function() return db.tipBrackets end, function(v) db.tipBrackets = v end)
+    bracketsDD:SetPoint("TOPLEFT", 48, -53)
+    local posDD = Dropdown(100, POSITIONS, function() return db.tipPosition end, function(v) db.tipPosition = v end)
+    posDD:SetPoint("LEFT", bracketsDD, "RIGHT", 6, 0)
+    local colorLabel = Label(page, nil, "Color")
+    colorLabel:SetPoint("TOPLEFT", 0, -88)
+    local colorDD = Dropdown(186, COLORS, function() return db.tipColor end, function(v) db.tipColor = v end,
+        function(v) return Sample(v) end)
+    colorDD:SetPoint("TOPLEFT", 48, -83)
+
+    -- Preview: three sample nodes in different difficulty colors.
+    local box = CreateFrame("Frame", nil, page)
+    box:SetPoint("TOPLEFT", 0, -114)
+    box:SetSize(234, 62)
+    local bg = Fill(box, "BACKGROUND", 0.03, 0.035, 0.055, 0.96); bg:SetAllPoints()
+    Outline(box, box, 0.29, 0.3, 0.34, 1)
+    local cap = Label(box, "GameFontDisableSmall", "PREVIEW"); cap:SetPoint("TOPLEFT", 8, -5)
+    preview = {}
+    for i = 1, 3 do
+        preview[i] = Label(box, "GameFontHighlightSmall")
+        preview[i]:SetPoint("TOPLEFT", 8, -5 - i * 13)
+    end
+    syncers[#syncers + 1] = UpdateTips
+    UpdateTips()
 
     -- Nearby nodes -------------------------------------------------------------
     local GROUP_TOP, CIRCLE_HEIGHT, DOT_HEIGHT, RING_HEIGHT = 86, 156, 152, 122
@@ -1352,7 +2865,7 @@ local navGap -- the empty stretch of the tab row between the last profession ico
 local function PlaceSortToggle()
     local toggle = nodesPage.sortToggle
     toggle:ClearAllPoints()
-    if frame.docked then
+    if frame.narrow then
         toggle:SetParent(nav)
         toggle:SetPoint("CENTER", navGap, "CENTER") -- midway between the last icon and Settings
         toggle:Show() -- kept in the row on the Settings tab too, so the row does not change
@@ -1364,6 +2877,11 @@ local function PlaceSortToggle()
 end
 
 local function ShowPage(key)
+    if key ~= selected and nodesPage.trainers then
+        nodesPage.trainers.open = false
+        if nodesPage.header then nodesPage.header:Reset() end
+    end
+    local switched = key ~= selected
     selected = key
     if key ~= SETTINGS then nodesPage.kind = key end
     pages.Nodes:SetShown(key ~= SETTINGS)
@@ -1373,7 +2891,10 @@ local function ShowPage(key)
         navTabs[rowKey]:SetSelected(rowKey == key)
     end
     PlaceSortToggle()
-    if key ~= SETTINGS then RefreshNodes() end
+    if key ~= SETTINGS then
+        RefreshNodes()
+        if switched and nodesPage.header and nodesPage.kind then nodesPage.header:Shown(nodesPage.kind) end
+    end
 end
 
 -- The game's own icon for a profession: the character's if known, else the skill's.
@@ -1755,6 +3276,10 @@ end
 local function ApplyLayout()
     local docked = ShouldDock()
     frame.docked = docked
+    -- The floating window is the same narrow panel as the docked one, just free to move
+    -- (and its Scale slider scales all of it). So the layout is always the narrow one.
+    local narrow = true
+    frame.narrow = narrow
     frame:SetScale(docked and FN.db.dockScale or FN.db.scale) -- each mode has its own scale
     -- Esc closes the floating window. The side panel instead follows the map, so
     -- that closing the map with Esc does not count as closing the panel.
@@ -1793,7 +3318,9 @@ local function ApplyLayout()
             floating = true
             frame:SetClampedToScreen(true)
             frame:ClearAllPoints()
-            frame:SetSize(WIDTH, HEIGHT)
+            -- Same size as the docked panel: the map's height when known.
+            local mapH = WorldMapFrame and WorldMapFrame:GetHeight() or 0
+            frame:SetSize(DOCK_WIDTH, math.max(460, math.min(640, mapH > 0 and mapH or 560)))
             frame:SetPoint("CENTER")
         end
     end
@@ -1803,9 +3330,9 @@ local function ApplyLayout()
     -- With the ornate border the scroll marker sits outside the box, in the strip
     -- the quest log uses for its scroll bar.
     local thumbOffset = (merged and Stock()) and 24 or 0
-    nodesPage.scroll.thumbOffset = thumbOffset
+    nodesPage.scroll.thumbOffset = (merged and Stock()) and 24 or 6
     settingsScroll.thumbOffset = thumbOffset
-    frame.pageWidth = (merged and (mergedWidth - 20)) or (docked and (DOCK_WIDTH - 40))
+    frame.pageWidth = (merged and (mergedWidth - 20)) or (narrow and (DOCK_WIDTH - 40))
         or (WIDTH - NAV_WIDTH - 48)
 
     -- Page list: a column on the left, or a strip across the top in the side panel.
@@ -1818,7 +3345,7 @@ local function ApplyLayout()
         nav:SetHeight(Stock() and 56 or 52) -- a little taller under the ornate border
         body:SetPoint("TOPLEFT", nav, "BOTTOMLEFT", 0, Stock() and -12 or -6) -- room for the border's ornaments
         body:SetPoint("BOTTOMRIGHT", 0, 0)
-    elseif docked then
+    elseif narrow then
         nav:SetPoint("TOPLEFT", 10, top)
         nav:SetPoint("TOPRIGHT", -10, top)
         nav:SetHeight(52)
@@ -1866,8 +3393,8 @@ local function ApplyLayout()
             if usable and not firstUsable then firstUsable = key end
         end
         -- Side panel: icon tabs in one row, Settings at the far right. Window: a list down the left.
-        row:SetShown(not docked)
-        tab:SetShown(docked)
+        row:SetShown(not narrow)
+        tab:SetShown(narrow)
         tab:ClearAllPoints()
         if key == SETTINGS then
             tab:SetPoint("TOPRIGHT", -4, -4)
@@ -1881,7 +3408,7 @@ local function ApplyLayout()
     navGap:ClearAllPoints()
     navGap:SetPoint("LEFT", navTabs[order[#order - 1]], "RIGHT")
     navGap:SetPoint("RIGHT", navTabs[SETTINGS], "LEFT")
-    navSeparator:SetShown(not docked)
+    navSeparator:SetShown(not narrow)
     navSeparator:ClearAllPoints()
     navSeparator:SetPoint("TOPLEFT", 10, -6 - (#order - 1) * 32 - 6)
     navSeparator:SetPoint("TOPRIGHT", -10, -6 - (#order - 1) * 32 - 6)
@@ -1897,10 +3424,10 @@ local function ApplyLayout()
     -- Stacked in the side panel, the sections run the panel's full width; side by side
     -- in the window they keep their fixed width.
     -- (pageWidth + 1 leaves the same margin on the right as the panel leaves on the left.)
-    local sectionWidth = docked and math.floor(pageWidth + 1) or SECTION_WIDTH
+    local sectionWidth = narrow and math.floor(pageWidth + 1) or SECTION_WIDTH
     for i = 1, #sectionWidthFollowers do sectionWidthFollowers[i](sectionWidth) end
     columnB:ClearAllPoints()
-    if docked then
+    if narrow then
         -- Each block's height already ends with one section gap, so the second
         -- block follows straight on and every header is the same distance apart.
         columnB:SetPoint("TOPLEFT", 0, -COLUMN_A_HEIGHT)
@@ -2029,8 +3556,18 @@ local function CreateOptions()
     columnB:SetSize(256, COLUMN_B_HEIGHT)
     BuildSettingsPage(columnA, columnB)
 
-    frame:SetScript("OnShow", SyncAll)
-    frame:SetScript("OnHide", UndoMerge) -- hand the map window back at its own size
+    frame:SetScript("OnShow", function()
+        -- A fresh opening: the gold flash and rank-line shimmer may play again.
+        if nodesPage.header then nodesPage.header:PanelOpened() end
+        SyncAll()
+        if nodesPage.header and nodesPage.kind and selected ~= SETTINGS then nodesPage.header:Shown(nodesPage.kind) end
+    end)
+    frame:SetScript("OnHide", function()
+        -- Hiding the panel (map closed, quest log shown, window closed) folds the trainer list away.
+        if nodesPage.trainers then nodesPage.trainers.open = false end
+        if nodesPage.header then nodesPage.header:Reset() end
+        UndoMerge() -- hand the map window back at its own size
+    end)
     frame:Hide()
 end
 

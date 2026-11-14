@@ -62,6 +62,16 @@ FN.defaults = {
     dotRingColor = { 0, 0, 0, 0.345 }, -- black, about a third opaque
     showAll = false, -- professions the character lacks can be opened (they are always listed, greyed)
     onlyTracked = true, -- herbs show only while Find Herbs is on, ore only while Find Minerals is on
+    onlyPole = true,    -- fishing pools show only while a fishing pole is equipped
+    cutoffs = true,     -- (Lvl sort) a faint line where each untrained rank ends
+    azShowBeyond = true, -- (A-Z sort) list nodes beyond the current rank too
+    muteAtMax = true,   -- at trained skill 300 the list drops its difficulty colors
+    tipWorldMap = true, -- world map icons show "150 Liferoot" on hover
+    tipOverworld = true, -- the game's own tooltips (world and minimap dots) get the level
+    tipBrackets = "none", -- "none", "square" or "round" around the level
+    tipPosition = "before", -- level "before" or "after" the name
+    tipColor = "level",  -- what takes the difficulty color: "level", "brackets", "name", "line", "none"
+    trainerCols = { 80, 60 }, -- trainer list column widths (Trainer, Dist), account-wide
     record = true,   -- save the spot of fishing pools the character fishes from
     recordHerb = true, -- save the spot of herbs the character gathers
     recordOre = true,  -- save the spot of veins the character mines
@@ -91,17 +101,46 @@ end
 -- The character's skill in a gathering profession and the profession's icon;
 -- nil when it is not known.
 function FN:GetSkill(kind)
+    local info = FN:GetSkillInfo(kind)
+    if info then return info.rank, info.icon end
+    return nil
+end
+
+-- Everything about a gathering profession the character knows, or nil:
+--   rank       trained skill (what ranks and the 300 check go by)
+--   max        the current rank's cap (75, 150, 225 or 300)
+--   bonus      skill from gear, racials, food... (rankModifier)
+--   effective  rank + bonus: what the character can actually gather
+--   icon       the profession's icon
+function FN:GetSkillInfo(kind)
     if not (GetProfessions and GetProfessionInfo) then return nil end
     local line = SKILL_LINES[kind]
     local slots = { GetProfessions() }
     for i = 1, 6 do
         local index = slots[i]
         if index then
-            local _, icon, rank, _, _, _, id = GetProfessionInfo(index)
-            if id == line then return rank or 0, icon end
+            local _, icon, rank, maxRank, _, _, id, rankModifier = GetProfessionInfo(index)
+            if id == line then
+                rank = rank or 0
+                local bonus = rankModifier or 0
+                return { rank = rank, max = maxRank or 0, bonus = bonus, effective = rank + bonus, icon = icon }
+            end
         end
     end
     return nil
+end
+
+-- Gathering difficulty color for a node needing `need` skill, as the game colors it in
+-- Forever: orange from the requirement, yellow from +25, green from +65 (Classic used +50),
+-- grey from +100, red below the requirement. `skill` nil (profession not known) is red.
+-- Returns r, g, b and a name ("red", "orange", "yellow", "green", "grey").
+function FN:DifficultyColor(skill, need)
+    if not skill or skill < need then return 1, 0.13, 0.13, "red" end
+    local over = skill - need
+    if over < 25 then return 1, 0.5, 0.25, "orange" end
+    if over < 65 then return 1, 1, 0, "yellow" end
+    if over < 100 then return 0.25, 0.75, 0.25, "green" end
+    return 0.5, 0.5, 0.5, "grey"
 end
 
 -- Forever fishes with the pole in the main hand.
@@ -154,8 +193,13 @@ local function ReadTracking()
                 local _
                 name, texture, active, _, _, spellID = C_Minimap.GetTrackingInfo(i)
             end
-            local kind = TrackKind(name, texture, spellID)
-            if kind then state[kind] = active and true or false end
+            -- Protected ("secret") values can't be read by addons: such an entry counts as
+            -- unknown, which never hides anything.
+            local secret = issecretvalue and (issecretvalue(name) or issecretvalue(texture)
+                or issecretvalue(active) or issecretvalue(spellID))
+            local ok, kind = false, nil
+            if not secret then ok, kind = pcall(TrackKind, name, texture, spellID) end
+            if ok and kind then state[kind] = active and true or false end
         end
     elseif GetTrackingTexture then
         -- Older clients: one tracking at a time, known only by its icon.
@@ -178,7 +222,7 @@ end
 -- Whether a ticked node type is shown right now.
 local function Showable(node)
     -- Pools have no tracking spell: they show while a pole is in hand.
-    if node.kind == "fish" then return poleEquipped end
+    if node.kind == "fish" then return poleEquipped or not db.onlyPole end
     if db.onlyTracked and tracking[node.kind] == false then return false end
     return true
 end
@@ -287,6 +331,19 @@ local function AcquirePin(node, where)
     pin.node = node
     pin.where = where
     pin.near = false
+    -- World map icons can show a tooltip: hover only, clicks still reach the map.
+    -- Minimap icons never take the mouse.
+    local hover = where == "world" and db.tipWorldMap and pin.EnableMouseMotion ~= nil
+    if hover then
+        pin:EnableMouseMotion(true)
+        if pin.SetMouseClickEnabled then pin:SetMouseClickEnabled(false) end
+        pin:SetScript("OnEnter", function(self) if FN.ShowWorldTip then FN:ShowWorldTip(self) end end)
+        pin:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    else
+        pin:EnableMouse(false)
+        pin:SetScript("OnEnter", nil)
+        pin:SetScript("OnLeave", nil)
+    end
     StylePin(pin)
     return pin
 end
@@ -524,6 +581,7 @@ end
 -- World map ------------------------------------------------------------------
 
 local mapPins = {}
+FN.mapPins = mapPins -- for the world map tooltip (Tooltips.lua)
 local mapRefreshQueued = false
 
 local function RefreshWorldMapNow()
@@ -723,7 +781,7 @@ driver:SetScript("OnEvent", function(self, event, arg1)
             end
         end
         FN:SetupButtons()
-        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.1.2"
+        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.2.0"
         -- Gold name, white version, gold author; the hint goes on its own indented line.
         -- The yellow star is the game's own raid target marker, drawn at text height.
         print(("|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t |cffffd100Forever Nodes|r |cffffffffv%s by Lvcid|r"
