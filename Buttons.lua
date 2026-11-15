@@ -356,10 +356,66 @@ local function SetupMinimapButton()
     if type(db.minimapIcon) ~= "table" then db.minimapIcon = { hide = false } end
 
     local broker
+    -- The game's own mouse button pictures (the same ones the map button's tooltip uses),
+    -- when this client has them; the tutorial art or plain words otherwise.
+    local function MouseIcon(atlases, fallback)
+        local info = C_Texture and C_Texture.GetAtlasInfo
+        for _, atlas in ipairs(atlases) do
+            if info and info(atlas) then return "|A:" .. atlas .. ":14:14|a" end
+        end
+        return fallback
+    end
+    local LMB = MouseIcon({ "NPE_LeftClick", "newplayertutorial-icon-mouse-leftbutton" }, "Left-click:")
+    local RMB = MouseIcon({ "NPE_RightClick", "newplayertutorial-icon-mouse-rightbutton" }, "Right-click:")
     local function FillTooltip(tooltip)
         tooltip:AddLine(TITLE)
-        tooltip:AddLine("Left click: settings", 1, 1, 1)
-        tooltip:AddLine("Right click: map icons " .. (db.worldmap and "|cff33ff33ON|r" or "|cffff4040OFF|r"), 1, 1, 1)
+        tooltip:AddLine(LMB .. " Open", 1, 1, 1)
+        tooltip:AddLine(RMB .. " Options", 1, 1, 1)
+    end
+
+    -- Right click: a short menu of the most used settings.
+    local function ShowMenu(owner)
+        if not (MenuUtil and MenuUtil.CreateContextMenu) then
+            FN:ToggleWorldMapIcons() -- no menu system: the old right click
+            return
+        end
+        -- The button's hover tooltip would sit next to the menu: hide it while the menu is up.
+        if dbicon.tooltip then dbicon.tooltip:Hide() end
+        if GameTooltip:IsOwned(owner) then GameTooltip:Hide() end
+        MenuUtil.CreateContextMenu(owner, function(_, root)
+            root:CreateTitle("|cffffd100Forever Nodes|r")
+            root:CreateDivider()
+
+            local icons = root:CreateButton("Icons")
+            for _, entry in ipairs({ { "worldmap", "World map" }, { "minimap", "Minimap" } }) do
+                icons:CreateCheckbox(entry[2], function() return db[entry[1]] end, function()
+                    db[entry[1]] = not db[entry[1]]
+                    FN:Refresh()
+                    if FN.RefreshOptions then FN:RefreshOptions() end
+                end)
+            end
+
+            local tips = root:CreateButton("Tooltips")
+            for _, entry in ipairs({ { "world", "World map" }, { "minimap", "Minimap" }, { "overworld", "Overworld" } }) do
+                tips:CreateCheckbox(entry[2], function() return FN:TipCfg(entry[1]).on end, function()
+                    local cfg = FN:TipCfg(entry[1])
+                    cfg.on = not cfg.on
+                    if entry[1] == "world" then FN:Refresh() end
+                    if FN.RefreshOptions then FN:RefreshOptions() end
+                end)
+            end
+
+            local panel = root:CreateButton("Panel")
+            for _, entry in ipairs({ { true, "Docked to world map" }, { false, "Floating panel" } }) do
+                panel:CreateRadio(entry[2], function() return (db.dock and true or false) == entry[1] end, function()
+                    db.dock = entry[1]
+                    if FN.DockSettingChanged then FN:DockSettingChanged() end
+                    if FN.RefreshOptions then FN:RefreshOptions() end
+                end)
+            end
+
+            root:CreateButton("Settings", function() FN:OpenToSettings() end)
+        end)
     end
     broker = ldb:NewDataObject(ADDON, {
         type = "launcher",
@@ -367,15 +423,7 @@ local function SetupMinimapButton()
         icon = FN.MEDIA .. "icon",
         OnClick = function(self, button)
             if button == "RightButton" then
-                FN:ToggleWorldMapIcons()
-                -- The library fills the tooltip only when the mouse enters; refill it
-                -- in place so it shows the new state.
-                local tooltip = dbicon.tooltip
-                if tooltip and tooltip:IsShown() and tooltip:IsOwned(self) then
-                    tooltip:ClearLines()
-                    FillTooltip(tooltip)
-                    tooltip:Show()
-                end
+                ShowMenu(self)
             else
                 FN:OpenFromCommand()
             end
