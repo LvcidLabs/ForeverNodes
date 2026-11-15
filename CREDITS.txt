@@ -28,5 +28,6 @@ Libs\HereBeDragons (HereBeDragons-2.0, HereBeDragons-Pins-2.0) by Nevcairiel, BS
 Libs\LibStub and Libs\CallbackHandler-1.0 from the Ace3 project.
 Libs\LibDataBroker-1.1 (by Tekkub) and Libs\LibDBIcon-1.0 (WoWAce), for the minimap button.
 
-Icons\disc.tga, ring.tga and border.tga are original to this addon.
-Icons\icon.tga, round_fill.tga, round_edge.tga and Icons\Rings\ are original to this addon.
+Icons\icon.tga, icon_dots.tga, icon_dots_dark.tga, disc.tga, round_fill.tga, round_edge.tga,
+tab_mask.tga, tab_glow.tga, where_eui.tga, where_stock.tga and Icons\Rings\ are original to this addon.
+Icons\preview_map.tga is a small crop of in-game map terrain, used as a backdrop for the marker preview.

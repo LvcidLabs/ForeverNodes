@@ -869,9 +869,8 @@ local function InitDB()
         for key in pairs(OLD) do db[key] = nil end
         db.markerParts = true
     end
-    -- Settings no longer used (older versions, and 1.2.2 test builds).
+    -- Settings no longer used by this version.
     db.trainerCols, db.mapButtonSide, db.tipMinimap = nil, nil, nil
-    db.circleEdgeSides, db.circleEdgeDistance, db.markerEdgeRing = nil, nil, nil
     if type(db.tips) == "table" then -- the 1.2.1 tooltip settings, once carried over (FN:TipCfg)
         db.tipWorldMap, db.tipOverworld, db.tipOverworldLine = nil, nil, nil
         db.tipBrackets, db.tipPosition, db.tipColor = nil, nil, nil
@@ -926,7 +925,7 @@ local function OnUpdate(_, elapsed)
     UpdateMinimap()
 end
 
--- "/fn pole": what the addon sees in the main hand, for troubleshooting.
+-- "/fn checkpole": what the addon sees in the main hand, for troubleshooting.
 local function PrintPoleInfo()
     local id = GetInventoryItemID("player", INVSLOT_MAINHAND or 16)
     local classID, subClassID
@@ -960,7 +959,7 @@ driver:SetScript("OnEvent", function(self, event, arg1)
             end
         end
         FN:SetupButtons()
-        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.3.0"
+        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.3.1"
         -- Gold name, white version, gold author; the hint goes on its own indented line.
         -- The yellow star is the game's own raid target marker, drawn at text height.
         print(("|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t |cffffd100Forever Nodes|r |cffffffffv%s by Lvcid|r"
@@ -987,13 +986,13 @@ SLASH_FOREVERNODES2 = "/fnodes"
 SLASH_FOREVERNODES3 = "/forevernodes"
 SlashCmdList.FOREVERNODES = function(text)
     text = text and text:lower() or ""
-    if text:match("^%s*pole") then
+    if text:match("^%s*checkpole") then
         PrintPoleInfo()
-    elseif text:match("^%s*tipdebug") then
+    elseif text:match("^%s*ttdebug") then
         -- Prints what the minimap tooltip matching sees (widths, candidates, learned padding).
         FN.tipDebug = not FN.tipDebug
         print("|cffffd100Forever Nodes:|r minimap tooltip debug " .. (FN.tipDebug and "on" or "off"))
-    elseif text:match("^%s*tipreset") then
+    elseif text:match("^%s*ttreset") then
         db.tipWidthPads = nil
         print("|cffffd100Forever Nodes:|r minimap tooltip widths forgotten; they are learned again")
     elseif text:match("^%s*debug") then

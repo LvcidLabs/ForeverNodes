@@ -188,6 +188,25 @@ local function Scroller(parent)
         thumb:SetColorTexture(c[1], c[2], c[3], on and 1 or 0.8)
     end
 
+    -- Stock look: the game's own scroll bar, the one the quest log uses, in place of the slim
+    -- marker (when this client has it).
+    local bar = Stock() and TryTemplate("EventFrame", nil, sf, "MinimalScrollBar")
+    if bar and not (bar.SetScrollPercentage and bar.SetVisibleExtentPercentage and bar.RegisterCallback) then
+        bar:Hide()
+        bar = nil
+    end
+    local syncingBar = false
+    if bar then
+        bar:SetFrameLevel(sf:GetFrameLevel() + 10)
+        if bar.SetHideIfUnscrollable then bar:SetHideIfUnscrollable(true) end
+        bar:RegisterCallback("OnScroll", function(_, pct)
+            if syncingBar or not sf.range or sf.range <= 0 then return end
+            sf:SetVerticalScroll(math.max(0, math.min(sf.range, pct * sf.range)))
+            sf:Update()
+        end, sf)
+        sf.stockBar = bar
+    end
+
     -- Rows fade out as they scroll up under the top edge, instead of being cut off there.
     -- Frames marked .noFade (large backgrounds) stay as they are.
     function sf:FadeTop()
@@ -212,6 +231,37 @@ local function Scroller(parent)
         local offset = math.min(self:GetVerticalScroll(), range)
         self:SetVerticalScroll(offset)
         self:FadeTop()
+        if bar then
+            grip:Hide()
+            self.range = range
+            local shown = range > 0 and view > 0
+            bar:SetShown(shown)
+            if not shown then return end
+            -- In the strip outside the list's border, where the quest log's scroll bar sits.
+            bar:ClearAllPoints()
+            local x = (self.thumbOffset or 0) - 6 - (self.rightBleed or 0)
+            -- In the quest log's place: line up with the quest log's own (hidden) scroll bar.
+            local qb = self.thumbOffset and self.thumbOffset > 20 and QuestScrollFrame and QuestScrollFrame.ScrollBar
+            local qbLeft, right = qb and qb.GetLeft and qb:GetLeft(), self:GetRight()
+            local top, bottom = -2, 2
+            if qbLeft and right then
+                -- The same column and the same full length as the quest log's bar.
+                local k = qb:GetEffectiveScale() / self:GetEffectiveScale()
+                x = qbLeft * k - right
+                local qTop, qBottom, sTop, sBottom = qb:GetTop(), qb:GetBottom(), self:GetTop(), self:GetBottom()
+                if qTop and qBottom and sTop and sBottom then
+                    top, bottom = qTop * k - sTop, qBottom * k - sBottom
+                end
+            end
+            bar:SetPoint("TOPLEFT", self, "TOPRIGHT", x, top)
+            bar:SetPoint("BOTTOMLEFT", self, "BOTTOMRIGHT", x, bottom)
+            syncingBar = true
+            bar:SetVisibleExtentPercentage(view / content)
+            if bar.SetPanExtentPercentage then bar:SetPanExtentPercentage((ROW_HEIGHT * 2) / range) end
+            bar:SetScrollPercentage(offset / range)
+            syncingBar = false
+            return
+        end
         if range <= 0 or view <= 0 then
             grip:Hide()
             return
@@ -221,7 +271,8 @@ local function Scroller(parent)
         grip:SetHeight(size)
         grip:ClearAllPoints()
         -- thumbOffset pushes the marker out past the pane's border, like the quest log's scroll bar.
-        grip:SetPoint("TOPRIGHT", self, "TOPRIGHT", (self.thumbOffset or 0) + 4, -(view - size) * (offset / range))
+        grip:SetPoint("TOPRIGHT", self, "TOPRIGHT", (self.thumbOffset or 0) + 4 - (self.rightBleed or 0),
+            -(view - size) * (offset / range))
         grip:Show()
     end
     -- Dragging: the marker follows the cursor, and the list follows the marker.
@@ -298,52 +349,82 @@ end
 local function IconTab(parent, icon, onClick)
     local b = CreateFrame("Button", nil, parent)
     b:SetSize(46, 44)
-    local stock = Stock()
-    if stock then
-        -- No plate around an unselected tab, so the icon can be larger. The open tab
-        -- gets the same rounded gold edge as the lit half of the Lvl / A-Z switch,
-        -- over the whole tab (icon and skill), like the EllesmereUI look's selector.
-        b.bg = Rounded(b, "BACKGROUND", "round_fill")
-        b.edge = Rounded(b, "BORDER", "round_edge")
-        local hl = Rounded(b, "HIGHLIGHT", "round_fill")
-        hl:SetVertexColor(1, 1, 1, 0.08)
-        b.stockPlate = true
-    else
-        b.bg = Rounded(b, "BACKGROUND", "round_fill")
-        b.edge = Rounded(b, "BORDER", "round_edge")
-        local hl = Rounded(b, "HIGHLIGHT", "round_fill")
-        hl:SetVertexColor(1, 1, 1, 0.10)
-    end
+    -- Lit the way the game lights its own tab and spell buttons: a dark edge at rest, a soft
+    -- white glow inside the edge under the mouse, a bright gold edge and glow when open.
+    b.bg = Rounded(b, "BACKGROUND", "round_fill")
+    b.bg:SetVertexColor(0, 0, 0, 0.6)
+    b.edge = Rounded(b, "BORDER", "round_edge")
+    local glowFile = FN.MEDIA .. "tab_glow"
+    b.glow = b:CreateTexture(nil, "OVERLAY", nil, 1)
+    b.glow:SetAllPoints()
+    b.glow:SetTexture(glowFile)
+    b.glow:SetBlendMode("ADD")
+    local hl = b:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints()
+    hl:SetTexture(glowFile)
+    hl:SetBlendMode("ADD")
+    hl:SetVertexColor(1, 1, 1, 0.55)
+    -- The icon fills the whole tab, cropped to its rounded shape (the icon's own border
+    -- trimmed off, and a little more top and bottom to fit the tab's width-to-height).
     b.pic = b:CreateTexture(nil, "ARTWORK")
-    -- Padded inside the tab's edge (the open tab's frame), the skill number underneath.
-    b.pic:SetSize(stock and 24 or 20, stock and 24 or 20)
-    b.pic:SetPoint("TOP", 0, stock and -4 or -5)
+    b.pic:SetPoint("TOPLEFT", 1, -1)
+    b.pic:SetPoint("BOTTOMRIGHT", -1, 1)
     b.pic:SetTexture(icon)
-    b.pic:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-    b.level = Label(b, "GameFontHighlightSmall") -- the character's skill, under the icon
-    b.level:SetPoint("BOTTOM", 0, stock and 4 or 5)
+    b.pic:SetTexCoord(0.08, 0.92, 0.10, 0.90)
+    local mask = b:CreateMaskTexture()
+    mask:SetAllPoints(b)
+    mask:SetTexture(FN.MEDIA .. "tab_mask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    b.pic:AddMaskTexture(mask)
+    -- The edge goes over the picture.
+    b.edge:SetDrawLayer("OVERLAY", 1)
+    -- The character's skill, in the middle of the picture: the skill bar's font (Friz
+    -- Quadrata in the stock look, the number font, Expressway under EllesmereUI), with a soft
+    -- shadow rather than an outline. Gold on the open tab, soft white on the others.
+    b.level = b:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    do
+        local face = Stock() and GameFontHighlightSmall:GetFont()
+            or (_G.Number12FontOutline and _G.Number12FontOutline:GetFont()) or b.level:GetFont()
+        local _, size = b.level:GetFont()
+        if face and size then b.level:SetFont(face, size + 1, "") end
+    end
+    b.level:SetDrawLayer("OVERLAY", 2)
+    b.level:SetPoint("BOTTOMRIGHT", -4, 3)
+    b.level:SetShadowOffset(1, -1)
+    b.level:SetShadowColor(0, 0, 0, 1)
     b.level:SetText(" ")
+    -- A dark fade up from the bottom edge of the picture, so the number reads over any icon.
+    local fade = b:CreateTexture(nil, "ARTWORK", nil, 2)
+    fade:SetColorTexture(1, 1, 1, 1)
+    fade:SetPoint("BOTTOMLEFT", b.pic, "BOTTOMLEFT")
+    fade:SetPoint("BOTTOMRIGHT", b.pic, "BOTTOMRIGHT")
+    fade:SetHeight(18)
+    if fade.SetGradient and CreateColor then
+        fade:SetGradient("VERTICAL", CreateColor(0, 0, 0, 0.85), CreateColor(0, 0, 0, 0))
+    else
+        fade:SetColorTexture(0, 0, 0, 0.3)
+    end
+    fade:AddMaskTexture(mask)
     b:SetScript("OnClick", onClick) -- no tooltip: the page title says which tab is open
     KeepChatFocus(b)
     function b:SetSelected(isSelected)
         self.isSelected = isSelected
-        if self.stockPlate then
-            -- Only the open tab shows a plate: the switch's lit-half colors.
-            self.bg:SetVertexColor(BRONZE[1], BRONZE[2], BRONZE[3], isSelected and 0.30 or 0)
-            self.edge:SetVertexColor(GOLD[1], GOLD[2], GOLD[3], isSelected and 0.85 or 0)
-        elseif isSelected then
-            self.bg:SetVertexColor(BRONZE[1], BRONZE[2], BRONZE[3], 0.45)
-            self.edge:SetVertexColor(GOLD[1], GOLD[2], GOLD[3], 0.95)
+        self.glow:SetShown(isSelected)
+        if self.dimmed then self.level:SetTextColor(0.6, 0.6, 0.6)
+        elseif isSelected then self.level:SetTextColor(1, 0.86, 0.45)
+        else self.level:SetTextColor(0.9, 0.88, 0.84) end
+        if isSelected then
+            self.edge:SetVertexColor(1, 0.86, 0.25, 1)
+            self.glow:SetVertexColor(1, 0.80, 0.20, 0.85)
         elseif self.locked then -- cannot be opened: a dark, receding edge
-            self.bg:SetVertexColor(0, 0, 0, 0.45)
-            self.edge:SetVertexColor(1, 1, 1, 0.07)
+            self.edge:SetVertexColor(0, 0, 0, 0.9)
         else
-            self.bg:SetVertexColor(0, 0, 0, 0.45)
-            self.edge:SetVertexColor(1, 1, 1, 0.22)
+            self.edge:SetVertexColor(0.30, 0.27, 0.22, 1)
         end
     end
     -- A profession the character does not have: greyed and darkened.
     function b:SetDimmed(dimmed)
+        self.dimmed = dimmed
+        self:SetSelected(self.isSelected or false)
         self.pic:SetDesaturated(dimmed)
         self.pic:SetVertexColor(dimmed and 0.45 or 1, dimmed and 0.45 or 1, dimmed and 0.45 or 1)
     end
@@ -353,6 +434,60 @@ local function IconTab(parent, icon, onClick)
         self:SetEnabled(not locked)
         self:SetSelected(self.isSelected or false)
     end
+    return b
+end
+
+-- The Settings tab in the side panel's tab row: a plain flat cog, no frame, kept in from the
+-- right edge so a map close button that sits there (some map addons move it) never covers it.
+local GEAR_SIZE = 26
+local function GearTab(parent, onClick)
+    local b = CreateFrame("Button", nil, parent)
+    b:SetSize(GEAR_SIZE, GEAR_SIZE)
+    -- The quest log's own flat cog when this client has it, else the game's gear icon.
+    b.pic = b:CreateTexture(nil, "ARTWORK")
+    b.pic:SetPoint("CENTER")
+    local atlas = C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo("questlog-icon-setting")
+    if atlas then
+        -- Closed: the cog's own art. Open: a flat gold in the cog's shape (the cog used as a
+        -- mask), since tinting the cog's grey art gold only gives a dull orange.
+        b.pic:SetAtlas("questlog-icon-setting")
+        b.pic:SetSize(GEAR_SIZE, GEAR_SIZE)
+        b.lit = b:CreateTexture(nil, "ARTWORK", nil, 1)
+        b.lit:SetAllPoints(b.pic)
+        b.lit:SetColorTexture(0.88, 0.72, 0.40, 1) -- the open tab's edge, as it shows
+        local cog = b:CreateMaskTexture()
+        cog:SetAllPoints(b.pic)
+        cog:SetAtlas("questlog-icon-setting")
+        b.lit:AddMaskTexture(cog)
+        b.flat = true
+    else
+        b.pic:SetTexture("Interface\\Icons\\INV_Misc_Gear_01")
+        b.pic:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        b.pic:SetSize(GEAR_SIZE - 2, GEAR_SIZE - 2)
+    end
+    -- Brighter under the mouse, gold while Settings is open.
+    local function Paint()
+        if b.flat then
+            b.lit:SetShown(b.isSelected)
+            b.pic:SetShown(not b.isSelected)
+            local k = b:IsMouseOver() and 1 or 0.75
+            b.pic:SetVertexColor(k, k, k)
+        else
+            local k = (b.isSelected or b:IsMouseOver()) and 1 or 0.8
+            b.pic:SetVertexColor(k, k, k)
+        end
+    end
+    b:SetScript("OnEnter", Paint)
+    b:SetScript("OnLeave", Paint)
+    b:SetScript("OnClick", onClick)
+    KeepChatFocus(b)
+    function b:SetSelected(isSelected)
+        self.isSelected = isSelected
+        Paint()
+    end
+    function b:SetDimmed() end
+    function b:SetLocked() end
+    b:SetSelected(false)
     return b
 end
 
@@ -889,11 +1024,42 @@ local function CreateRow(parent)
 
     -- Rank cutoff: a slightly stronger line along the row's top edge, where a rank ends.
     -- It runs edge to edge of the pane (past the row on both sides) to read as a tier break.
-    r.cut = Fill(r, "BORDER", 1, 1, 1, 0.12)
+    -- Drawn as an engraved groove: a dark line, a faint light edge under it, and a soft shadow
+    -- falling onto the rows below.
+    r.cut = Fill(r, "BORDER", 0, 0, 0, 0.85)
     r.cut:SetHeight(1)
     r.cut:SetPoint("TOPLEFT", -LIST_BLEED, 0)
     r.cut:SetPoint("TOPRIGHT", LIST_BLEED, 0)
     r.cut:Hide()
+    r.cutLight = Fill(r, "BORDER", 1, 1, 1, 0.11)
+    r.cutLight:SetHeight(1)
+    r.cutLight:SetPoint("TOPLEFT", r.cut, "BOTTOMLEFT")
+    r.cutLight:SetPoint("TOPRIGHT", r.cut, "BOTTOMRIGHT")
+    r.cutLight:Hide()
+    r.cutShade = r:CreateTexture(nil, "BORDER")
+    r.cutShade:SetColorTexture(1, 1, 1, 1)
+    r.cutShade:SetHeight(7)
+    r.cutShade:SetPoint("TOPLEFT", r.cutLight, "BOTTOMLEFT")
+    r.cutShade:SetPoint("TOPRIGHT", r.cutLight, "BOTTOMRIGHT")
+    if r.cutShade.SetGradient and CreateColor then
+        r.cutShade:SetGradient("VERTICAL", CreateColor(0, 0, 0, 0), CreateColor(0, 0, 0, 0.36))
+    else
+        r.cutShade:SetColorTexture(0, 0, 0, 0.12)
+    end
+    r.cutShade:Hide()
+    -- A small lock in the middle of the line: what lies below is beyond the current rank.
+    -- (The game's own lock art.)
+    r.cutLock = r:CreateTexture(nil, "OVERLAY")
+    r.cutLock:SetSize(12, 12)
+    r.cutLock:SetPoint("CENTER", r.cut, "CENTER", 0, 0)
+    if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo("Monuments-Lock") then
+        r.cutLock:SetAtlas("Monuments-Lock")
+    else
+        r.cutLock:SetTexture("Interface\\LFGFrame\\UI-LFG-ICON-LOCK")
+    end
+    r.cutLock:SetDesaturated(true)
+    r.cutLock:SetVertexColor(0.75, 0.75, 0.75, 0.65)
+    r.cutLock:Hide()
     -- The cutoff's one-time shimmer (the line the next rank removes), played by the panel.
     r.shimmer = Fade(r, "OVERLAY", GOLD[1], GOLD[2], GOLD[3], 0.55)
     r.shimmer:SetHeight(2)
@@ -923,6 +1089,7 @@ local function CreateRow(parent)
         local key = self.node.key
         FN.enabled[key] = (not FN.enabled[key]) or nil
         self.mark:SetShown(FN.enabled[key] and true or false)
+        if nodesPage.ForgetUndo then nodesPage:ForgetUndo() end
         FN:Refresh()
     end)
     return r
@@ -957,7 +1124,9 @@ local function RefreshNodes()
     -- The list's clipping area starts at the pane's border (LIST_BLEED left of the
     -- page) so the row stripes can run out to it; the rows themselves stay put.
     page.scroll:SetPoint("TOPLEFT", -LIST_BLEED, listTop)
-    page.scroll:SetPoint("BOTTOMRIGHT", 0, 0)
+    -- Out to the pane's border on the right too, so a rank line (and its end ornament) reaches it.
+    page.scroll:SetPoint("BOTTOMRIGHT", LIST_BLEED, 0)
+    page.scroll.rightBleed = LIST_BLEED
     page.fishNote:SetShown(current == "fish" and db.onlyPole)
 
     page.title:SetText(current and FN.kindNames[current] or "")
@@ -968,12 +1137,41 @@ local function RefreshNodes()
     -- While the trainer list is open the two buttons sit just above its pins and could be
     -- clicked by mistake (or to close the list): they rest, dimmed, until it closes.
     local resting = page.trainers and page.trainers.open and current ~= nil
-    for _, b in ipairs({ page.all, page.none }) do
+    page.undo:SetShown(current ~= nil and page:CanUndo())
+    for _, b in ipairs({ page.all, page.none, page.undo }) do
         if b.SetEnabled then b:SetEnabled(not resting) end
         b:EnableMouse(not resting)
         b:SetAlpha(resting and 0.35 or 1)
     end
     page.empty:SetShown(current == nil)
+
+    -- The profession's own card art as the list box's background, exactly as the game's recipe
+    -- pane uses it: one picture (brown, glow, dark edges and the illustration) filling the box
+    -- edge to edge. The EllesmereUI look takes it in grey and a little darker, to suit its
+    -- flat, neutral panels.
+    do
+        if not page.art then
+            page.art = page.frame:CreateTexture(nil, "BACKGROUND", nil, 2)
+            page.art:SetPoint("TOPLEFT", page.frame, "TOPLEFT", -LIST_BLEED, LIST_BLEED)
+            page.art:SetPoint("BOTTOMRIGHT", page.frame, "BOTTOMRIGHT", LIST_BLEED, -LIST_BLEED)
+            -- Darkened a little, so the rows stand out from it.
+            page.artShade = page.frame:CreateTexture(nil, "BACKGROUND", nil, 3)
+            page.artShade:SetAllPoints(page.art)
+        end
+        local stock = Stock()
+        page.art:SetDesaturated(not stock)
+        page.artShade:SetColorTexture(0, 0, 0, stock and 0.175 or 0.4)
+        local NAMES = { herb = "Herbalism", ore = "Mining", fish = "Fishing" }
+        local card = current and NAMES[current] and ("Profession-background-card-" .. NAMES[current])
+        if card and C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(card) then
+            page.art:SetAtlas(card)
+            page.art:Show()
+            page.artShade:Show()
+        else
+            page.art:Hide()
+            page.artShade:Hide()
+        end
+    end
 
     local info = current and skills[current]
     local ranked = info and current ~= "fish" -- dimming and rank lines are for herbs and ore
@@ -1052,8 +1250,9 @@ local function RefreshNodes()
         row.mark:SetShown(FN.enabled[node.key] and true or false)
         row.skill:SetText(node.skill > 0 and node.skill or "")
 
-        -- Beyond the current rank: greyed name, number and icon, no color wash.
-        local dim = below300 and node.skill > cap
+        -- Beyond the current rank, or a profession the character hasn't learned: greyed name,
+        -- number and icon, no color wash.
+        local dim = (below300 and node.skill > cap) or not info
         if dim then
             row.name:SetTextColor(0.33, 0.33, 0.33)
             row.skill:SetTextColor(0.27, 0.27, 0.27)
@@ -1066,9 +1265,6 @@ local function RefreshNodes()
             row.icon:SetAlpha(1)
             if muted then
                 row.skill:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
-                row.tint:SetFade(1, 1, 1, 0)
-            elseif not info and node.skill > 0 then
-                row.skill:SetTextColor(1, 0.13, 0.13) -- profession not known: can't gather
                 row.tint:SetFade(1, 1, 1, 0)
             else
                 local r, g, b, tinted = Difficulty(skill, node.skill)
@@ -1088,6 +1284,9 @@ local function RefreshNodes()
             end
         end
         row.cut:SetShown(cut)
+        row.cutLock:SetShown(cut)
+        row.cutLight:SetShown(cut)
+        row.cutShade:SetShown(cut)
         row.shimmer:Hide()
         row:Show()
     end
@@ -1295,10 +1494,13 @@ local function BuildHeader(page)
     bar.text:SetPoint("CENTER", bar, "TOPLEFT", 0, 0) -- placed in Layout: centered on the whole bar
     bar.text:SetShadowOffset(1, -1)
     -- The same size as the cue line (View trainers, ...) and the other text on the bar.
+    -- Stock look: the cue's own font (Friz Quadrata), so the two read alike; the number font
+    -- looks small and thin there.
     do
         local font, _, flags = bar.text:GetFont()
-        local _, small = GameFontHighlightSmall:GetFont()
-        if font and small then bar.text:SetFont(font, small, flags) end
+        local small, size = GameFontHighlightSmall:GetFont()
+        if Stock() and small then font = small end
+        if font and size then bar.text:SetFont(font, size, flags) end
     end
     bar.cue = CreateFrame("Frame", nil, bar)
     bar.cue:SetPoint("TOPLEFT", bar, "TOPLEFT", 2, -3)
@@ -2231,17 +2433,63 @@ local function BuildNodesPage(page)
     nodesPage.title = Label(page, "GameFontNormalLarge")
     nodesPage.title:SetPoint("TOPLEFT", 2, -3)
 
+    -- Undo for Clear Selection / Select All only. The first of those clicks remembers what was
+    -- ticked; more of them keep that first memory; Undo puts it back. Ticking a node by hand
+    -- (or a reload) forgets it. { [node key] = was ticked }, for the nodes those clicks changed.
+    local undo = nil
     local function SetAll(state)
         for _, node in ipairs(nodesPage.list or {}) do
+            undo = undo or {}
+            if undo[node.key] == nil then undo[node.key] = FN.enabled[node.key] and true or false end
             FN.enabled[node.key] = state or nil
         end
         FN:Refresh()
         RefreshNodes()
     end
+    function nodesPage:ForgetUndo()
+        if undo then undo = nil; RefreshNodes() end
+    end
+    -- True when the open list has something to undo.
+    function nodesPage:CanUndo()
+        if not undo then return false end
+        for _, node in ipairs(self.list or {}) do
+            if undo[node.key] ~= nil then return true end
+        end
+        return false
+    end
     nodesPage.none = Card(page, "Clear Selection", 104, 24, function() SetAll(false) end)
     nodesPage.all = Card(page, "Select All", 76, 24, function() SetAll(true) end)
     nodesPage.all:SetPoint("TOPRIGHT")
     nodesPage.none:SetPoint("RIGHT", nodesPage.all, "LEFT", -4, 0)
+    -- Undo: a small square with a back arrow, left of Clear Selection.
+    local undoButton = Card(page, "", 24, 24, function()
+        if not undo then return end
+        for key, was in pairs(undo) do FN.enabled[key] = was or nil end
+        undo = nil
+        FN:Refresh()
+        RefreshNodes()
+    end)
+    undoButton:SetPoint("RIGHT", nodesPage.none, "LEFT", -4, 0)
+    if undoButton.text then undoButton.text:SetText("") end
+    if undoButton.SetText then undoButton:SetText("") end
+    local arrow = undoButton:CreateTexture(nil, "OVERLAY")
+    arrow:SetPoint("CENTER")
+    if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo("common-icon-undo") then
+        arrow:SetAtlas("common-icon-undo")
+        arrow:SetSize(14, 14)
+    else
+        arrow:SetTexture("Interface\\Buttons\\UI-RefreshButton")
+        arrow:SetSize(14, 14)
+    end
+    undoButton:HookScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText("Undo")
+        GameTooltip:AddLine("Puts back the ticks from before Clear Selection / Select All.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    undoButton:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    undoButton:Hide()
+    nodesPage.undo = undoButton
 
     -- Sort: one button showing both choices, the active one lit; a click flips it.
     -- (PlaceSortToggle moves it to the side panel's top row when docked.)
@@ -2598,7 +2846,7 @@ local function BuildSettingsPage(columnA, columnB)
     local profSection
     profSection, page = Add(sectionsA, columnA, "colors", "Professions", 124)
     local profPage = page
-    local note = Label(page, "GameFontDisableSmall", "Shared by the circle and the dot.")
+    local note = Label(page, "GameFontDisableSmall", "Used on the maps, the nearby marker and the panel.")
     note:SetPoint("TOPLEFT", 0, 0)
     Swatch(page, "Herbs", function() return db.colors.herb end):SetPoint("TOPLEFT", 0, -20)
     Swatch(page, "Mining", function() return db.colors.ore end):SetPoint("TOPLEFT", 78, -20)
@@ -2628,6 +2876,10 @@ local function BuildSettingsPage(columnA, columnB)
             RefreshNodes()
         end)
     pole:SetPoint("TOPLEFT", 0, -74)
+    -- Professions the character lacks can be opened too (they are always listed, greyed).
+    Check(page, "Allow access to unlearned professions",
+        function() return db.showAll end,
+        function(v) db.showAll = v and true or false; FN:RefreshOptions() end):SetPoint("TOPLEFT", 0, -98)
     local function PaintProf()
         tracked:SetLabel(DIM .. "(|r|cff" .. Hex("herb") .. "Herbs|r" .. DIM .. "/|r|cff" .. Hex("ore") .. "Ore|r" .. DIM .. ")|r Only while tracking")
         pole:SetLabel(DIM .. "(|r|cff" .. Hex("fish") .. "Fish pools|r" .. DIM .. ")|r Only while pole equipped")
@@ -2673,13 +2925,10 @@ local function BuildSettingsPage(columnA, columnB)
         Check(page, DIM .. "(|r|cffffd100Skill 300|r" .. DIM .. ")|r Mute " .. Gradient("difficulty coloring") .. " " .. DIM .. "(doesn't affect tooltips)|r",
             function() return db.muteAtMax end,
             function(v) db.muteAtMax = v and true or false; RefreshNodes() end),
-        Check(page, "Allow access to unlearned professions",
-            function() return db.showAll end,
-            function(v) db.showAll = v and true or false; FN:RefreshOptions() end),
     }
 
     local function LayoutProf()
-        local y = 100
+        local y = 124
         profLine:ClearAllPoints()
         profLine:SetPoint("TOPLEFT", profPage, "TOPLEFT", -SECTION_INSET, -(y - 2))
         profLine:SetPoint("TOPRIGHT", profPage, "TOPRIGHT", SECTION_INSET, -(y - 2))
@@ -3481,6 +3730,12 @@ local function PlaceSortToggle()
         toggle:SetPoint("RIGHT", nodesPage.none, "LEFT", -12, 0)
         toggle:Show()
     end
+    -- On the Settings page there is no list to sort: it rests, dimmed, like Clear Selection
+    -- and Select All while the trainer list is open.
+    local resting = selected == SETTINGS
+    if toggle.SetEnabled then toggle:SetEnabled(not resting) end
+    toggle:EnableMouse(not resting)
+    toggle:SetAlpha(resting and 0.35 or 1)
 end
 
 local function ShowPage(key)
@@ -3627,6 +3882,19 @@ local function SetQuestLog(show)
     internal = false
 end
 
+-- The docked panel takes the quest log's own place: the quest log is opened as usual (so the
+-- game and every map addon lay the window out exactly as they do for it), made invisible, and
+-- the panel sits in its space. `covering` is true while the quest log is hidden like that.
+local covering = false
+local function Cover(on)
+    local log = WorldMapFrame and WorldMapFrame.QuestLog
+    covering = (on and log) and true or false
+    if log then log:SetAlpha(covering and 0 or 1) end
+    -- The map's quest log arrow follows (see SetupMapPanel: it reads "closed" while covered).
+    local toggle = WorldMapFrame and WorldMapFrame.SidePanelToggle
+    if toggle and toggle.Refresh and not InCombatLockdown() then toggle:Refresh() end
+end
+
 local floating = false -- the floating window has been placed (keeps where the player dragged it)
 
 -- The quest log's ornate border ------------------------------------------------------
@@ -3639,11 +3907,31 @@ local floating = false -- the floating window has been placed (keeps where the p
 -- Returns how many were placed. `flip` turns the copy upside down (top pieces at the bottom).
 local FLIPPED = { TOP = "BOTTOM", BOTTOM = "TOP", TOPLEFT = "BOTTOMLEFT", BOTTOMLEFT = "TOPLEFT",
     TOPRIGHT = "BOTTOMRIGHT", BOTTOMRIGHT = "TOPRIGHT" }
-local function CloneArt(source, target, flip)
+local function CloneArt(source, target, flip, skipFill, onlyCenter)
     local copies, owners = {}, { [source] = true }
+    -- A piece that covers the whole frame (anchored on all four sides): the shaded fill.
+    local function IsFill(region)
+        local sides = {}
+        for i = 1, region:GetNumPoints() do
+            local point = region:GetPoint(i)
+            if point then
+                for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+                    if point:find(side) then sides[side] = true end
+                end
+            end
+        end
+        return sides.TOP and sides.BOTTOM and sides.LEFT and sides.RIGHT
+    end
+    -- A centered ornament (the crest): hung from the frame's middle top or bottom only.
+    local function IsCenter(region)
+        if region:GetNumPoints() ~= 1 then return false end
+        local point = region:GetPoint(1)
+        return point == "TOP" or point == "BOTTOM" or point == "CENTER"
+    end
     local function CopyRegions(owner)
         for _, region in ipairs({ owner:GetRegions() }) do
-            if region:IsObjectType("Texture") and region:IsShown() then
+            if region:IsObjectType("Texture") and region:IsShown() and not (skipFill and IsFill(region))
+                and not (onlyCenter and not IsCenter(region)) then
                 local layer, sublevel = region:GetDrawLayer()
                 local copy = target:CreateTexture(nil, layer, nil, sublevel)
                 local atlas = region.GetAtlas and region:GetAtlas()
@@ -3720,13 +4008,47 @@ local function UseQuestBorder(pane, on, flip)
             made:SetPoint("BOTTOMRIGHT", 3, -4)
             made:SetFrameLevel(pane:GetFrameLevel() + 20)
             made:EnableMouse(false)
-            local ok, placed = pcall(CloneArt, source, made, flip)
+            -- The tab row (flipped) keeps only the ornate border's crest, at its bottom; its edge
+            -- is the quest log search box's border (below).
+            -- The tab row keeps only the ornate border's crest, at its bottom; its edge is our own
+            -- rounded frame, colored after the quest log's search box (a dark well with a muted
+            -- bronze-grey rim and a faint light top edge), so the corners keep their shape.
+            local hasEdge = flip and true or false
+            local ok, placed = pcall(CloneArt, source, made, flip, flip, hasEdge)
             if ok and placed and placed > 0 then ornates[pane] = made else made:Hide() end
+            if hasEdge and ornates[pane] then
+                local edge = CreateFrame("Frame", nil, pane)
+                edge:SetAllPoints(pane)
+                edge:SetFrameLevel(pane:GetFrameLevel()) -- under the tabs and switch
+                edge:EnableMouse(false)
+                local well = Rounded(edge, "BACKGROUND", "round_fill")
+                well:SetVertexColor(0, 0, 0, 0.35)
+                local rim = Rounded(edge, "BORDER", "round_edge")
+                rim:SetVertexColor(0.31, 0.27, 0.21, 0.9)
+                local inner = Rounded(edge, "BORDER", "round_edge")
+                inner:ClearAllPoints()
+                inner:SetPoint("TOPLEFT", 1, -1)
+                inner:SetPoint("BOTTOMRIGHT", -1, 1)
+                inner:SetVertexColor(0, 0, 0, 0.6)
+                local shine = edge:CreateTexture(nil, "ARTWORK")
+                shine:SetColorTexture(1, 1, 1, 1)
+                shine:SetHeight(1)
+                shine:SetPoint("TOPLEFT", 6, -1)
+                shine:SetPoint("TOPRIGHT", -6, -1)
+                if shine.SetGradient and CreateColor then
+                    local c, z = CreateColor(1, 0.95, 0.85, 0.06), CreateColor(1, 0.95, 0.85, 0)
+                    shine:SetGradient("VERTICAL", z, c)
+                else
+                    shine:SetVertexColor(1, 0.95, 0.85, 0.08)
+                end
+                made.rowEdge = edge
+            end
         end
     end
     local ornate = ornates[pane]
     if not ornate then return end
     ornate:SetShown(on)
+    if ornate.rowEdge then ornate.rowEdge:SetShown(on) end
     if pane.NineSlice then pane.NineSlice:SetShown(not on) end -- not both edges at once
 end
 
@@ -3924,6 +4246,7 @@ local function ApplyLayout()
         frame:SetFrameStrata(strata)
         frame:SetFrameLevel(level)
     else
+        frame:SetAlpha(1) -- floating: never faded with the map
         local overMap = WorldMapFrame and WorldMapFrame:IsShown() and MapIsFullScreen()
         frame:SetFrameStrata(overMap and "FULLSCREEN_DIALOG" or "DIALOG")
     end
@@ -3934,7 +4257,33 @@ local function ApplyLayout()
     -- Three shapes: merged into the map window (no frame of its own), attached
     -- beside it as a narrow window (when merging is not possible), or floating.
     local merged, mergedWidth = false, MERGED_WIDTH
-    if docked then
+    local log = WorldMapFrame and WorldMapFrame.QuestLog
+    -- (While the quest log is being closed it stays the place to be: the hooks decide what comes next.)
+    if docked and covering and log then
+        -- In the quest log's space. The right, top and bottom margins are the ones the panel
+        -- always had inside the map window; the left edge follows the quest log's own.
+        local map = WorldMapFrame
+        floating = false
+        UndoMerge()
+        frame:SetClampedToScreen(false)
+        frame:ClearAllPoints()
+        local stock = Stock()
+        -- Stock: the list box runs as far right as the quest log's own, with its scroll bar
+        -- strip outside it (the strip the scroll marker uses).
+        local side, margins = stock and 25 or 6, stock and 25 or 14 -- stock: flush with the quest log's left edge
+        local inset = margins - side -- from the quest log's left edge
+        local fs = frame:GetEffectiveScale()
+        local mapRight, logLeft = map:GetRight(), log:GetLeft()
+        if mapRight and logLeft then
+            mergedWidth = math.max(200, (mapRight * map:GetEffectiveScale() - logLeft * log:GetEffectiveScale()) / fs
+                - side - inset)
+        end
+        frame:SetPoint("TOPRIGHT", map, "TOPRIGHT", -side, -(stock and 33 or MERGED_TOP))
+        frame:SetPoint("BOTTOMRIGHT", map, "BOTTOMRIGHT", -side, stock and 9 or side)
+        frame:SetPoint("LEFT", log, "LEFT", inset, 0)
+        merged = true
+    elseif docked then
+        -- The quest log could not be opened (in combat): make room in the map window instead.
         local map = WorldMapFrame
         local ratio = frame:GetEffectiveScale() / map:GetEffectiveScale()
         floating = false
@@ -3960,6 +4309,10 @@ local function ApplyLayout()
         end
     else
         UndoMerge()
+        if covering then -- floating now: give the side back to the quest log, closed
+            Cover(false)
+            SetQuestLog(false)
+        end
         if not floating then
             floating = true
             frame:SetClampedToScreen(true)
@@ -3975,8 +4328,8 @@ local function ApplyLayout()
     UseQuestBorder(nav, merged and Stock(), true) -- the tab row is on top: its crest goes at the bottom
     -- With the ornate border the scroll marker sits outside the box, in the strip
     -- the quest log uses for its scroll bar.
-    local thumbOffset = (merged and Stock()) and 24 or 0
-    nodesPage.scroll.thumbOffset = (merged and Stock()) and 24 or 6
+    local thumbOffset = (merged and Stock()) and 33 or 0
+    nodesPage.scroll.thumbOffset = (merged and Stock()) and 33 or 6
     settingsScroll.thumbOffset = thumbOffset
     frame.pageWidth = (merged and (mergedWidth - 20)) or (narrow and (DOCK_WIDTH - 40))
         or (WIDTH - NAV_WIDTH - 48)
@@ -4043,7 +4396,8 @@ local function ApplyLayout()
         tab:SetShown(narrow)
         tab:ClearAllPoints()
         if key == SETTINGS then
-            tab:SetPoint("TOPRIGHT", -4, -4)
+            -- In from the right edge, centered on the row of profession tabs (44 tall, 4 down).
+            tab:SetPoint("TOPRIGHT", -26, -(4 + (44 - GEAR_SIZE) / 2))
         else
             tab:SetPoint("TOPLEFT", 4 + (i - 1) * 50, -4)
         end
@@ -4184,9 +4538,16 @@ local function CreateOptions()
     local gear = "Interface\\Icons\\INV_Misc_Gear_01"
     local function OpenSettings() ShowPage(SETTINGS) end
     navRows[SETTINGS] = NavRow(nav, "Settings", gear, OpenSettings)
-    navTabs[SETTINGS] = IconTab(nav, gear, OpenSettings)
-    navTabs[SETTINGS].pic:ClearAllPoints() -- no skill number under it, so center the gear
-    navTabs[SETTINGS].pic:SetPoint("CENTER")
+    -- The cog toggles: on Settings, a second click goes back to the profession tab that was
+    -- open (when it can still be opened).
+    navTabs[SETTINGS] = GearTab(nav, function()
+        local back = nodesPage.kind
+        if selected == SETTINGS and back and navTabs[back] and navTabs[back]:IsEnabled() then
+            ShowPage(back)
+        else
+            ShowPage(SETTINGS)
+        end
+    end)
     navSeparator = Fill(nav, "ARTWORK", BRONZE[1], BRONZE[2], BRONZE[3], 0.35)
     navSeparator:SetHeight(1)
     navGap = CreateFrame("Frame", nil, nav)
@@ -4225,7 +4586,9 @@ local function OpenPanel()
     wantPanel = true
     State().open = true
     MeasureQuestLayout() -- while the quest log is still up, note the room it takes
-    SetQuestLog(false)
+    -- Take the quest log's place: open it (if it is not already) and hide it under the panel.
+    SetQuestLog(true)
+    if QuestLogShown() then Cover(true) end
     if frame:IsShown() then
         ApplyLayout() -- was floating: attach it
     else
@@ -4234,8 +4597,8 @@ local function OpenPanel()
     frame:Raise()
 end
 
--- why: "button" (the node button), "x" (the panel's close button) or "quest"
--- (the player opened the quest log).
+-- why: "button" (the node button), "x" (the panel's close button) or "quest" (the player
+-- opened the quest log, or a quest).
 local function ClosePanel(why)
     -- One side panel at a time, and closing one leaves none open: neither panel
     -- brings the other back.
@@ -4243,20 +4606,29 @@ local function ClosePanel(why)
     state.open = false
     state.questBefore, state.nodesBefore = nil, nil
     frame:Hide()
+    if covering then
+        Cover(false)
+        -- The player asked for the quest log: it stays, now seen. Otherwise the side closes.
+        SetQuestLog(why == "quest")
+    end
 end
 
 -- Re-opens the side panel when the map comes back (or after a reload) if it was
 -- open when the map was last closed.
 local function RestorePanel()
     local map = WorldMapFrame
-    if not (map and map:IsShown()) or MapIsFullScreen() or not FN.db.dock then return end
-    local state = State()
-    if not state.open then return end
-    if frame and frame:IsShown() and frame.docked then return end
-    if QuestLogShown() then -- the quest log has the side: go with what is on screen
-        state.open = false
+    if not (map and map:IsShown()) then return end
+    if MapIsFullScreen() or not FN.db.dock then
+        if covering and not (frame and frame:IsShown()) then Cover(false) end
         return
     end
+    local state = State()
+    if not state.open then
+        -- Left hidden when the map was last closed but not wanted now: let it be seen.
+        if covering and not (frame and frame:IsShown()) then Cover(false) end
+        return
+    end
+    if frame and frame:IsShown() and frame.docked then return end
     OpenPanel()
 end
 
@@ -4266,6 +4638,13 @@ function FN:UpdateDock()
     if not (frame and frame:IsShown()) then return end
     if frame.docked and not ShouldDock() then
         frame:Hide()
+        -- Map still up (it went full screen): the quest log is let go of, closed, and is taken
+        -- again when the panel comes back. Map closed: it stays hidden, so reopening the map
+        -- never flashes it.
+        if covering and WorldMapFrame:IsShown() then
+            Cover(false)
+            SetQuestLog(false)
+        end
         return
     end
     ApplyLayout()
@@ -4277,6 +4656,28 @@ function FN:SetupMapPanel()
     if not map then return end
 
     local reopenPending = false -- the quest log was just closed and the node panel is due back
+
+    -- The map's quest log button while the panel has the quest log's place: the player wants
+    -- the quest log. The game has just closed it (it was open under the panel); open it again,
+    -- seen, and close the panel, all before the next frame is drawn. (Hooked before the
+    -- layout hooks below, so they see the result.)
+    if type(map.HandleUserActionToggleSidePanel) == "function" then
+        hooksecurefunc(map, "HandleUserActionToggleSidePanel", function()
+            if internal or not covering or MapIsFullScreen() or QuestLogShown() then return end
+            if not (frame and frame:IsShown() and frame.docked) then return end
+            ClosePanel("quest")
+        end)
+    end
+    -- Its arrow: "closed" while the panel covers the quest log, since to the player the quest
+    -- log is not open.
+    local toggle = map.SidePanelToggle
+    if toggle and type(toggle.Refresh) == "function" then
+        hooksecurefunc(toggle, "Refresh", function(self)
+            if not covering then return end
+            if self.OpenButton then self.OpenButton:Show() end
+            if self.CloseButton then self.CloseButton:Hide() end
+        end)
+    end
 
     -- Runs straight after each step of the map's own resizing, in the same frame,
     -- so the window is never drawn half-way (which showed as a flash).
@@ -4326,10 +4727,15 @@ function FN:SetupMapPanel()
     map:HookScript("OnUpdate", function()
         -- The map came to the front (it was clicked): stay above it.
         if frame and frame:IsShown() and frame.docked then
+            -- The map fades while the player moves (an option of the game's): fade with it.
+            local a = map:GetAlpha()
+            if math.abs(frame:GetAlpha() - a) > 0.001 then frame:SetAlpha(a) end
             local strata, level = DockPlace()
             if frame:GetFrameStrata() ~= strata then frame:SetFrameStrata(strata) end
             if frame:GetFrameLevel() ~= level then frame:SetFrameLevel(level) end
         end
+        -- Something showed the hidden quest log again: keep it out of sight under the panel.
+        if covering and map.QuestLog and map.QuestLog:GetAlpha() ~= 0 then map.QuestLog:SetAlpha(0) end
         local now = MapScale()
         if math.abs(now - lastScale) > 0.0001 then
             lastScale = now
@@ -4351,6 +4757,14 @@ function FN:SetupMapPanel()
     log:HookScript("OnHide", function()
         reopenPending = false -- closing the quest log leaves the side empty
     end)
+    -- A quest was opened (from the tracker, a map pin, ...): show the quest log.
+    for _, name in ipairs({ "QuestMapFrame_ShowQuestDetails", "QuestMapFrame_OpenToQuestDetails" }) do
+        if type(_G[name]) == "function" then
+            hooksecurefunc(name, function()
+                if covering and frame and frame:IsShown() and frame.docked then ClosePanel("quest") end
+            end)
+        end
+    end
 end
 
 -- The docking setting was switched: a side panel that is open floats free at once.
