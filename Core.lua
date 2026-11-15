@@ -67,7 +67,9 @@ FN.defaults = {
     azShowBeyond = true, -- (A-Z sort) list nodes beyond the current rank too
     muteAtMax = true,   -- at trained skill 300 the list drops its difficulty colors
     tipWorldMap = true, -- world map icons show "150 Liferoot" on hover
-    tipOverworld = true, -- the game's own tooltips (world and minimap dots) get the level
+    tipOverworld = true, -- the game's own tooltips for herbs and veins in the world get the level
+    tipOverworldLine = "name", -- minimap and overworld: the level on the "name" line or a "skill" line ("150 Herbalism")
+    tipMinimap = true,   -- the game's minimap tooltip for a yellow dot gets the level
     tipBrackets = "none", -- "none", "square" or "round" around the level
     tipPosition = "before", -- level "before" or "after" the name
     tipColor = "level",  -- what takes the difficulty color: "level", "brackets", "name", "line", "none"
@@ -333,7 +335,7 @@ local function AcquirePin(node, where)
     pin.near = false
     -- World map icons can show a tooltip: hover only, clicks still reach the map.
     -- Minimap icons never take the mouse.
-    local hover = where == "world" and db.tipWorldMap and pin.EnableMouseMotion ~= nil
+    local hover = where == "world" and FN:TipCfg("world").on and pin.EnableMouseMotion ~= nil
     if hover then
         pin:EnableMouseMotion(true)
         if pin.SetMouseClickEnabled then pin:SetMouseClickEnabled(false) end
@@ -522,6 +524,97 @@ local function PlaceMinimapPins()
     end
 end
 
+-- Minimap tooltips -----------------------------------------------------------
+-- The game's own minimap tooltip no longer lets addons read which herb or vein a
+-- yellow dot is, so it is worked out from where the cursor is: the known spawn
+-- points (of every herb and ore, whether ticked or not) right under it.
+
+local tipGrid -- [instanceID][cellKey] = { point, ... }, every herb and ore spawn point
+
+local function TipGrid()
+    if tipGrid then return tipGrid end
+    tipGrid = {}
+    for _, node in ipairs(FN.nodes) do
+        if node.kind ~= "fish" and node.skill and node.skill > 0 then
+            local list = WorldPoints(node.key)
+            for i = 1, #list do
+                local point = list[i]
+                local cells = tipGrid[point.inst]
+                if not cells then
+                    cells = {}
+                    tipGrid[point.inst] = cells
+                end
+                local key = CellKey(floor(point.x / CELL), floor(point.y / CELL))
+                local cell = cells[key]
+                if not cell then
+                    cell = {}
+                    cells[key] = cell
+                end
+                cell[#cell + 1] = point
+            end
+        end
+    end
+    return tipGrid
+end
+
+-- The herb and vein types with a spawn point within `reach` px of the cursor on the minimap,
+-- as { node = distance in px, ... }. Only kinds that have dots count (see below). nil when
+-- the minimap view can't be worked out.
+function FN:MinimapNodesNearCursor(reach)
+    local px, py, inst = HBD:GetPlayerWorldPosition()
+    if not (px and py and inst) or IsInInstance() then return nil end
+    local rotate = GetCVar("rotateMinimap") == "1"
+    local facing = rotate and GetPlayerFacing() or 0
+    if not facing then return nil end
+    local radius = ViewRadius()
+    local w, h = Minimap:GetWidth() / 2, Minimap:GetHeight() / 2
+    local mx, my = Minimap:GetCenter()
+    local scale = Minimap:GetEffectiveScale()
+    if not (radius and radius > 0 and w > 0 and h > 0 and mx and scale and scale > 0) then return nil end
+
+    -- The cursor in the same terms the icons are placed in (see PlaceMinimapPins).
+    local cx, cy = GetCursorPosition()
+    local ndx, ndy = (cx / scale - mx) / w, -(cy / scale - my) / h
+    -- The world spot under the cursor, to find the grid cells to look in.
+    local s, c = math.sin(facing), math.cos(facing)
+    local wx, wy = ndx * radius, ndy * radius
+    if rotate then wx, wy = wx * c + wy * s, -wx * s + wy * c end
+    local tx, ty = px - wx, py - wy
+
+    local cells = TipGrid()[inst]
+    if not cells then return nil end
+    local near, reach2 = {}, reach * reach
+    -- Which kinds have dots: the ones being tracked. Where the game gives no tracking answer
+    -- for a kind (the character lacks that tracking spell), the character must at least know
+    -- the profession, or e.g. veins would be matched while only herbs show.
+    local shown = {}
+    for _, kind in ipairs({ "herb", "ore" }) do
+        if tracking[kind] == nil then shown[kind] = FN:GetSkillInfo(kind) ~= nil
+        else shown[kind] = tracking[kind] end
+    end
+    local gx, gy = floor(tx / CELL), floor(ty / CELL)
+    for ix = gx - 1, gx + 1 do
+        for iy = gy - 1, gy + 1 do
+            local cell = cells[CellKey(ix, iy)]
+            if cell then
+                for i = 1, #cell do
+                    local point = cell[i]
+                    local node = point.node
+                    if shown[node.kind] then
+                        local dx, dy = px - point.x, py - point.y
+                        if rotate then dx, dy = dx * c - dy * s, dx * s + dy * c end
+                        local ox, oy = (dx / radius - ndx) * w, (dy / radius - ndy) * h
+                        local d = ox * ox + oy * oy
+                        if d <= reach2 and (not near[node] or d < near[node]) then near[node] = d end
+                    end
+                end
+            end
+        end
+    end
+    for node, d in pairs(near) do near[node] = math.sqrt(d) end
+    return near
+end
+
 -- Minimap --------------------------------------------------------------------
 
 local function UpdateMinimap()
@@ -630,6 +723,7 @@ end
 -- Call after locations were added to a node (Record.lua).
 function FN:PointsChanged(key)
     worldCache[key] = nil
+    tipGrid = nil
     if FN.enabled[key] then FN:Refresh() end
     if FN.RefreshOptions then FN:RefreshOptions() end
 end
@@ -781,7 +875,7 @@ driver:SetScript("OnEvent", function(self, event, arg1)
             end
         end
         FN:SetupButtons()
-        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.2.1"
+        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.2.2"
         -- Gold name, white version, gold author; the hint goes on its own indented line.
         -- The yellow star is the game's own raid target marker, drawn at text height.
         print(("|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t |cffffd100Forever Nodes|r |cffffffffv%s by Lvcid|r"
@@ -810,6 +904,13 @@ SlashCmdList.FOREVERNODES = function(text)
     text = text and text:lower() or ""
     if text:match("^%s*pole") then
         PrintPoleInfo()
+    elseif text:match("^%s*tipdebug") then
+        -- Prints what the minimap tooltip matching sees (widths, candidates, learned padding).
+        FN.tipDebug = not FN.tipDebug
+        print("|cffffd100Forever Nodes:|r minimap tooltip debug " .. (FN.tipDebug and "on" or "off"))
+    elseif text:match("^%s*tipreset") then
+        db.tipWidthPads = nil
+        print("|cffffd100Forever Nodes:|r minimap tooltip widths forgotten; they are learned again")
     elseif text:match("^%s*debug") then
         -- Prints where fishing loot came from, to check that pool recording sees pools.
         db.debug = not db.debug

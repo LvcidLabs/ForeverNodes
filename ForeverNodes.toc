@@ -2,7 +2,7 @@
 ## Title: Forever N|cffffd928o|cffffe050d|cffffe878e|cfffff0a0s|r
 ## Notes: Herb, ore and fishing pool locations on the minimap and world map, with a panel docked to the world map that shows your skill and where to train.
 ## Author: Lvcid
-## Version: 1.2.1
+## Version: 1.2.2
 ## IconTexture: Interface\AddOns\ForeverNodes\Icons\icon
 ## SavedVariables: ForeverNodesDB
 ## SavedVariablesPerCharacter: ForeverNodesCharDB

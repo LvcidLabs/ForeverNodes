@@ -447,6 +447,82 @@ local function SortToggle(parent, onClick)
     return b
 end
 
+-- Short lines fading out on either side of a fold's label ("--- Label ---"), like the ones
+-- beside "Hide trainers".
+local function SideLines(owner, fs)
+    local function Line(flip)
+        local t = owner:CreateTexture(nil, "OVERLAY")
+        t:SetColorTexture(1, 1, 1, 1)
+        t:SetSize(26, 1)
+        if t.SetGradient and CreateColor then
+            local a, b = CreateColor(0.6, 0.6, 0.6, 0), CreateColor(0.6, 0.6, 0.6, 0.8)
+            if flip then t:SetGradient("HORIZONTAL", b, a) else t:SetGradient("HORIZONTAL", a, b) end
+        else
+            t:SetVertexColor(0.6, 0.6, 0.6, 0.5)
+        end
+        return t
+    end
+    local l, r = Line(false), Line(true)
+    l:SetPoint("RIGHT", fs, "LEFT", -12, 0)
+    r:SetPoint("LEFT", fs, "RIGHT", 12, 0)
+    return l, r
+end
+
+-- The same switch with any number of parts: "World map | Minimap | Overworld".
+-- `onPick(i)` gets the part clicked; :SetPick(i) lights a part.
+local function MultiToggle(parent, labels, onPick)
+    local b = CreateFrame("Button", nil, parent)
+    b:SetHeight(22)
+    local bg = Rounded(b, "BACKGROUND", "round_fill")
+    bg:SetVertexColor(0, 0, 0, 0.45)
+    b.half = b:CreateTexture(nil, "BORDER") -- the lit part
+    b.half:SetTexture(FN.MEDIA .. "round_fill")
+    if b.half.SetTextureSliceMargins then b.half:SetTextureSliceMargins(10, 10, 10, 10) end
+    b.half:SetVertexColor(BRONZE[1], BRONZE[2], BRONZE[3], Stock() and 0.30 or 0.65)
+    local edge = Rounded(b, "ARTWORK", "round_edge")
+    edge:SetVertexColor(1, 1, 1, 0.25)
+    local halfEdge = b:CreateTexture(nil, "OVERLAY")
+    halfEdge:SetTexture(FN.MEDIA .. "round_edge")
+    if halfEdge.SetTextureSliceMargins then halfEdge:SetTextureSliceMargins(10, 10, 10, 10) end
+    halfEdge:SetVertexColor(GOLD[1], GOLD[2], GOLD[3], 0.85)
+    halfEdge:SetAllPoints(b.half)
+    local hl = Rounded(b, "HIGHLIGHT", "round_fill")
+    hl:SetVertexColor(1, 1, 1, 0.08)
+    local PAD = 8
+    local parts, x = {}, 0
+    for i, text in ipairs(labels) do
+        local fs = Label(b, "GameFontHighlightSmall", text)
+        local w = math.ceil(fs:GetStringWidth()) + PAD * 2
+        fs:SetPoint("CENTER", b, "LEFT", x + w / 2, 0)
+        if i > 1 then
+            local divider = Fill(b, "ARTWORK", 1, 1, 1, 0.25)
+            divider:SetSize(1, 12)
+            divider:SetPoint("CENTER", b, "LEFT", x, 0)
+        end
+        parts[i] = { fs = fs, x = x, w = w }
+        x = x + w
+    end
+    b:SetWidth(x)
+    b:SetScript("OnClick", function(self)
+        local cx = GetCursorPosition() / self:GetEffectiveScale() - self:GetLeft()
+        for i, p in ipairs(parts) do
+            if cx < p.x + p.w or i == #parts then onPick(i); return end
+        end
+    end)
+    KeepChatFocus(b)
+    function b:SetPick(n)
+        local p = parts[n] or parts[1]
+        self.half:ClearAllPoints()
+        self.half:SetPoint("TOPLEFT", self, "TOPLEFT", p.x, 0)
+        self.half:SetPoint("BOTTOMRIGHT", self, "BOTTOMLEFT", p.x + p.w, 0)
+        for i, q in ipairs(parts) do
+            if i == n then q.fs:SetTextColor(1, 1, 1) else q.fs:SetTextColor(MUTED[1], MUTED[2], MUTED[3]) end
+        end
+    end
+    b:SetPick(1)
+    return b
+end
+
 -- A tick box drawn on `owner`; returns the box texture and the tick texture.
 local function TickBox(owner)
     local box
@@ -819,6 +895,14 @@ local function RefreshNodes()
     page.sortLabel:SetShown(current ~= nil and not compact) -- the side panel has the toggle in its top row
     page.all:SetShown(current ~= nil)
     page.none:SetShown(current ~= nil)
+    -- While the trainer list is open the two buttons sit just above its pins and could be
+    -- clicked by mistake (or to close the list): they rest, dimmed, until it closes.
+    local resting = page.trainers and page.trainers.open and current ~= nil
+    for _, b in ipairs({ page.all, page.none }) do
+        if b.SetEnabled then b:SetEnabled(not resting) end
+        b:EnableMouse(not resting)
+        b:SetAlpha(resting and 0.35 or 1)
+    end
     page.empty:SetShown(current == nil)
 
     local info = current and skills[current]
@@ -2264,7 +2348,7 @@ local function Section(column, key, title, height, onToggle)
     end
     header:SetScript("OnClick", function()
         FN.db.collapsed[key] = (not section:IsCollapsed()) or nil
-        onToggle()
+        onToggle(section)
     end)
     return section
 end
@@ -2292,15 +2376,10 @@ end
 
 local function BuildSettingsPage(columnA, columnB)
     local db = FN.db
-    -- On a fresh install only Maps starts open; after that the player's own choices are kept.
-    if type(db.collapsed) ~= "table" then
-        db.collapsed = { colors = true, nearby = true, lists = true, window = true, tooltips = true }
-    end
-    -- The Tooltips section (new in 1.2.0) also starts closed for players who already had settings.
-    if not db.tooltipsFolded then
-        db.collapsed.tooltips = true
-        db.tooltipsFolded = true
-    end
+    -- Every section starts closed at each login or reload, so the whole list shows at a glance;
+    -- while playing, the one left open stays open (closing and reopening the map keeps it).
+    db.collapsed = { maps = true, colors = true, tooltips = true, nearby = true, lists = true, window = true }
+    db.sectionsClosed122, db.tooltipsFolded = nil, nil -- no longer needed
 
     local function Bool(key, refresh)
         return function() return db[key] end, function(v)
@@ -2320,14 +2399,28 @@ local function BuildSettingsPage(columnA, columnB)
 
     -- Sections, top to bottom in each block. `Relayout(true)` also re-fits the window.
     local sectionsA, sectionsB = {}, {}
+    local relayouting = false
     local function Relayout(refit)
+        if relayouting then return end -- a fold closing while sections are restacked
+        relayouting = true
         COLUMN_A_HEIGHT = StackSections(columnA, sectionsA)
         COLUMN_B_HEIGHT = StackSections(columnB, sectionsB)
         columnA:SetHeight(COLUMN_A_HEIGHT)
         columnB:SetHeight(COLUMN_B_HEIGHT)
+        relayouting = false
         if refit and frame and frame:IsShown() then FN:UpdateDock() end
     end
-    local function Toggled() Relayout(true) end
+    -- One section open at a time: opening one closes the rest.
+    local function Toggled(opened)
+        if opened and not opened:IsCollapsed() then
+            for _, list in ipairs({ sectionsA, sectionsB }) do
+                for _, other in ipairs(list) do
+                    if other ~= opened then db.collapsed[other.key] = true end
+                end
+            end
+        end
+        Relayout(true)
+    end
     local function Add(list, column, key, title, height)
         local section = Section(column, key, title, height, Toggled)
         list[#list + 1] = section
@@ -2392,6 +2485,7 @@ local function BuildSettingsPage(columnA, columnB)
     advanced:SetSize(220, 20) -- the clickable area covers the whole label
     local advancedText = Label(advanced, "GameFontDisable", "Advanced Minimap Settings") -- grey; gold on hover
     advancedText:SetPoint("CENTER")
+    SideLines(advanced, advancedText)
     advanced:SetScript("OnEnter", function() advancedText:SetTextColor(GOLD[1], GOLD[2], GOLD[3]) end)
     advanced:SetScript("OnLeave", function() advancedText:SetTextColor(0.5, 0.5, 0.5) end)
     -- `page` is reused for the sections that follow; the layout below needs this one.
@@ -2452,6 +2546,7 @@ local function BuildSettingsPage(columnA, columnB)
         if advancedOpen then
             advancedOpen = false
             LayoutMaps()
+            Relayout(false) -- or its room stays open below it
         end
     end)
     Check(page, "Circular Icons (crop to look cleaner)",
@@ -2514,6 +2609,7 @@ local function BuildSettingsPage(columnA, columnB)
     fold:SetSize(220, 20)
     local foldText = Label(fold, "GameFontDisable", "Appearance & Behavior")
     foldText:SetPoint("CENTER")
+    SideLines(fold, foldText)
     fold:SetScript("OnEnter", function() foldText:SetTextColor(GOLD[1], GOLD[2], GOLD[3]) end)
     fold:SetScript("OnLeave", function() foldText:SetTextColor(0.5, 0.5, 0.5) end)
     local foldOpen = false
@@ -2573,60 +2669,112 @@ local function BuildSettingsPage(columnA, columnB)
         Relayout(true)
     end)
     profPage:HookScript("OnHide", function()
-        if foldOpen then foldOpen = false; LayoutProf() end
+        if foldOpen then
+            foldOpen = false
+            LayoutProf()
+            Relayout(false) -- or its room stays open below it
+        end
     end)
     syncers[#syncers + 1] = LayoutProf
 
     -- Tooltips -----------------------------------------------------------------
-    -- World map and overworld tooltips, and the style of the added level.
+    -- One fold per kind of thing (only Herbalism & Mining for now). Inside it, a switch picks
+    -- which tooltip is being set up (world map, minimap or overworld), each with its own
+    -- settings, and a sample tooltip follows every choice (hovering a menu entry previews it).
     local tipSection
-    tipSection, page = Add(sectionsA, columnA, "tooltips", "Tooltips", 190)
+    tipSection, page = Add(sectionsA, columnA, "tooltips", "Tooltips", 200)
     local tipPage = page
-    Check(page, "World map tooltips",
-        function() return db.tipWorldMap end,
-        function(v) db.tipWorldMap = v and true or false; FN:Refresh() end):SetPoint("TOPLEFT", 0, 0)
-    Check(page, "Overworld tooltips",
-        function() return db.tipOverworld end,
-        function(v) db.tipOverworld = v and true or false end):SetPoint("TOPLEFT", 0, -24)
+    local UpdateTips, LayoutTips -- set below; the controls call them
+    local editingTip = "overworld"
+    local hover -- { key, value } while a menu entry is hovered: shown in the preview only
+    local function Cfg() return FN:TipCfg(editingTip) end
 
-    local SAMPLE = { name = "Liferoot", skill = 150, kind = "herb" }
-    -- A sample line drawn in a given color mode, using the current brackets and position.
-    local function Sample(mode, node, r, g, b)
-        node = node or SAMPLE
-        local c = ("|cff%02x%02x%02x"):format(math.floor((r or 1) * 255), math.floor((g or 0.5) * 255), math.floor((b or 0.25) * 255))
-        local open, close = "", ""
-        if db.tipBrackets == "square" then open, close = "[", "]" elseif db.tipBrackets == "round" then open, close = "(", ")" end
-        local lvl = tostring(node.skill)
-        local num
-        if mode == "level" then num = open .. c .. lvl .. "|r" .. close
-        elseif mode == "brackets" then num = c .. open .. lvl .. close .. "|r"
-        else num = open .. lvl .. close end
-        local nm = mode == "name" and (c .. node.name .. "|r") or node.name
-        if mode == "line" then
-            return c .. (db.tipPosition == "after" and (node.name .. " " .. open .. lvl .. close) or (open .. lvl .. close .. " " .. node.name)) .. "|r"
-        end
-        return db.tipPosition == "after" and (nm .. " " .. num) or (num .. " " .. nm)
+    -- The fold: a centered label, gold on hover, like Advanced Minimap Settings.
+    local gatherOpen = true
+    local gather = CreateFrame("Button", nil, page)
+    gather:SetSize(220, 20)
+    gather:SetPoint("TOP", page, "TOP", 0, -6)
+    local gatherText = Label(gather, "GameFontDisable", "Herbalism & Mining")
+    gatherText:SetPoint("CENTER")
+    SideLines(gather, gatherText)
+    local function PaintGather(lit)
+        if lit then gatherText:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+        else gatherText:SetTextColor(0.5, 0.5, 0.5) end
     end
-
-    local BRACKETS = { { "none", "150" }, { "square", "[ 150 ]" }, { "round", "( 150 )" } }
-    local POSITIONS = { { "before", "Before name" }, { "after", "After name" } }
-    local COLORS = { { "level", "Level only" }, { "brackets", "Level and brackets" }, { "name", "Name only" },
-        { "line", "Whole line" }, { "none", "None" } }
-    local function LabelOf(list, v) for _, e in ipairs(list) do if e[1] == v then return e[2] end end return list[1][2] end
-
-    local preview
-    local function UpdateTips()
-        if preview then
-            preview[1]:SetText(Sample(db.tipColor, { name = "Peacebloom", skill = 1 }, 0.5, 0.5, 0.5))
-            preview[2]:SetText(Sample(db.tipColor, SAMPLE, 1, 0.5, 0.25))
-            preview[3]:SetText(Sample(db.tipColor, { name = "Khadgar's Whisker", skill = 185 }, 1, 0.13, 0.13))
+    gather:SetScript("OnEnter", function() PaintGather(true) end)
+    gather:SetScript("OnLeave", function() PaintGather(false) end)
+    gather:SetScript("OnClick", function()
+        gatherOpen = not gatherOpen
+        LayoutTips()
+        Relayout(true)
+    end)
+    local gatherParts = {} -- everything inside the fold
+    -- A line above and below the label, border to border, like the one above Advanced Minimap
+    -- Settings (and in the section border's color), so it reads as its own sub-section even
+    -- with general tooltip settings above it later.
+    -- (Drawn on a frame of their own, above the section's other contents.)
+    local lineFrame = CreateFrame("Frame", nil, page)
+    lineFrame:SetAllPoints(page)
+    lineFrame:SetFrameLevel(page:GetFrameLevel() + 8)
+    local function GatherLine(y)
+        local t = Stock() and Fill(lineFrame, "ARTWORK", 0.20, 0.13, 0.07, 0.85) or Fill(lineFrame, "ARTWORK", 1, 1, 1, 0.10)
+        t:SetHeight(1)
+        function t:At(at)
+            self:ClearAllPoints()
+            self:SetPoint("TOPLEFT", tipPage, "TOPLEFT", -SECTION_INSET, -at)
+            self:SetPoint("TOPRIGHT", tipPage, "TOPRIGHT", SECTION_INSET, -at)
         end
+        t:At(y)
+        return t
     end
+    GatherLine(2)
+    -- The closing line: under the label when closed, under everything in the fold when open.
+    local gatherEnd = GatherLine(30)
 
-    -- A dropdown button; the menu uses the game's own menus when available (colored entries work).
-    local function Dropdown(width, entries, getValue, setValue, labelFor)
+    -- Which tooltip: one switch, like Maps & Icons' "Minimap | World map", with three parts.
+    local TARGETS = { "world", "minimap", "overworld" }
+    local targetToggle = MultiToggle(page, { "World map", "Minimap", "Overworld" }, function(i)
+        editingTip = TARGETS[i]
+        hover = nil
+        ResyncAll()
+        LayoutTips()
+        Relayout(true)
+    end)
+    targetToggle:SetPoint("TOP", page, "TOP", 0, -26)
+    gatherParts[#gatherParts + 1] = targetToggle
+
+    -- Shown at all, for the tooltip being edited.
+    local onCheck = Check(page, "",
+        function() return Cfg().on end,
+        function(v)
+            Cfg().on = v and true or false
+            if editingTip == "world" then FN:Refresh() end
+            UpdateTips()
+        end)
+    onCheck:SetPoint("TOPLEFT", 0, -56)
+    gatherParts[#gatherParts + 1] = onCheck
+    -- The minimap's herb is worked out from where the cursor is (the game hides its name).
+    local miniTag = Label(onCheck, "GameFontNormalSmall", "EXPERIMENTAL")
+    miniTag:SetTextColor(1, 0.25, 0.25)
+    do
+        local font, size, flags = miniTag:GetFont()
+        if font and size then miniTag:SetFont(font, math.max(size - 2, 8), flags) end
+    end
+    miniTag:SetPoint("LEFT", onCheck, "RIGHT", 2, 0)
+
+    -- A dropdown for one setting of the tooltip being edited. `entries` is a list of
+    -- { value, text } or a function returning one (for wording that follows other choices).
+    local function Dropdown(width, entries, key)
         local b = Card(page, "", width, 22, nil)
-        local function Refresh() b.text:SetText(labelFor and labelFor(getValue()) or LabelOf(entries, getValue())) end
+        local function List() return type(entries) == "function" and entries() or entries end
+        local function Refresh()
+            local v = Cfg()[key]
+            local list = List()
+            local text = list[1][2]
+            for _, e in ipairs(list) do if e[1] == v then text = e[2] end end
+            b.text:SetText(text)
+        end
+        local function Choose(v) Cfg()[key] = v; hover = nil; ResyncAll(); LayoutTips() end
         b:SetScript("OnClick", function(self)
             -- Clicking the button while its menu is open just closes it. (The click itself can
             -- already have closed the menu by the time we get here: a menu that closed a moment
@@ -2642,55 +2790,155 @@ local function BuildSettingsPage(columnA, columnB)
             end
             if MenuUtil and MenuUtil.CreateContextMenu then
                 self.menu = MenuUtil.CreateContextMenu(self, function(_, root)
-                    for _, e in ipairs(entries) do
-                        local text = labelFor and (labelFor(e[1]) .. "  |cff8d8b86" .. e[2] .. "|r") or e[2]
-                        root:CreateRadio(text, function() return getValue() == e[1] end,
-                            function() setValue(e[1]); Refresh(); UpdateTips() end)
+                    if root.SetMinimumWidth then root:SetMinimumWidth(self:GetWidth()) end
+                    for _, e in ipairs(List()) do
+                        local item = root:CreateRadio(e[2], function() return Cfg()[key] == e[1] end,
+                            function() Choose(e[1]) end)
+                        -- Hovering an entry shows it in the preview.
+                        if item and item.SetOnEnter then
+                            item:SetOnEnter(function() hover = { key, e[1] }; UpdateTips() end)
+                            item:SetOnLeave(function() hover = nil; UpdateTips() end)
+                        end
                     end
                 end)
                 local menu = self.menu
+                -- Opened under the button, as wide as it, rather than wherever the cursor is.
+                if menu and menu.ClearAllPoints then
+                    menu:ClearAllPoints()
+                    menu:SetPoint("TOPLEFT", self, "BOTTOMLEFT", 0, -2)
+                end
                 if menu and menu.HookScript then
                     menu:HookScript("OnHide", function()
+                        hover = nil
+                        UpdateTips()
                         if self.menu == menu then self.menu = nil; self.menuClosedAt = GetTime() end
                     end)
                 end
             else
                 -- No menu system: step through the choices.
-                local i = 1
-                for n, e in ipairs(entries) do if e[1] == getValue() then i = n end end
-                setValue(entries[i % #entries + 1][1]); Refresh(); UpdateTips()
+                local list, i = List(), 1
+                for n, e in ipairs(list) do if e[1] == Cfg()[key] then i = n end end
+                Choose(list[i % #list + 1][1])
             end
         end)
         syncers[#syncers + 1] = Refresh
         return b
     end
 
-    local levelLabel = Label(page, nil, "Level")
-    levelLabel:SetPoint("TOPLEFT", 0, -58)
-    local bracketsDD = Dropdown(80, BRACKETS, function() return db.tipBrackets end, function(v) db.tipBrackets = v end)
-    bracketsDD:SetPoint("TOPLEFT", 48, -53)
-    local posDD = Dropdown(100, POSITIONS, function() return db.tipPosition end, function(v) db.tipPosition = v end)
-    posDD:SetPoint("LEFT", bracketsDD, "RIGHT", 6, 0)
-    local colorLabel = Label(page, nil, "Color")
-    colorLabel:SetPoint("TOPLEFT", 0, -88)
-    local colorDD = Dropdown(186, COLORS, function() return db.tipColor end, function(v) db.tipColor = v end,
-        function(v) return Sample(v) end)
-    colorDD:SetPoint("TOPLEFT", 48, -83)
+    -- Labelled rows: the label on the left, the dropdowns lined up in one column.
+    local DD_X, DD_W = 84, 150
+    local rows = {}
+    local function Row(key, text, entries)
+        local row = { key = key }
+        row.label = Label(page, nil, text)
+        row.dd = Dropdown(DD_W, entries, key)
+        rows[#rows + 1] = row
+        gatherParts[#gatherParts + 1] = row.label
+        gatherParts[#gatherParts + 1] = row.dd
+        return row
+    end
+    local attachRow = Row("attach", "Attach to", { { "name", "The node's name" }, { "skill", "The skill's name" } })
+    local placeRow = Row("place", "Placement", { { "before", "Before" }, { "after", "After" } })
+    Row("style", "Style", function()
+        local after = Cfg().place == "after" or (editingTip == "minimap" and Cfg().attach ~= "skill")
+        return {
+            { "none", "Simple:  150" },
+            { "round", "Rounded:  (150)" },
+            { "square", "Squared:  [150]" },
+            { "separator", after and "Separator:  Name | 150" or "Separator:  150 | Name" },
+        }
+    end)
+    Row("color", "Color", function()
+        return {
+            { "level", "The level" },
+            { "brackets", Cfg().style == "separator" and "Level and separator"
+                or (Cfg().style == "none" and "The level" or "Level and brackets") },
+            { "name", "The name" },
+            { "line", "The whole line" },
+            { "none", "No color" },
+        }
+    end)
 
-    -- Preview: three sample nodes in different difficulty colors.
+    -- Preview: a sample tooltip for the one being edited.
     local box = CreateFrame("Frame", nil, page)
-    box:SetPoint("TOPLEFT", 0, -114)
-    box:SetSize(234, 62)
+    box:SetSize(234, 52)
+    sectionWidthFollowers[#sectionWidthFollowers + 1] = function(w) box:SetWidth(math.max(160, w - 2 * SECTION_INSET)) end
     local bg = Fill(box, "BACKGROUND", 0.03, 0.035, 0.055, 0.96); bg:SetAllPoints()
     Outline(box, box, 0.29, 0.3, 0.34, 1)
-    local cap = Label(box, "GameFontDisableSmall", "PREVIEW"); cap:SetPoint("TOPLEFT", 8, -5)
-    preview = {}
-    for i = 1, 3 do
-        preview[i] = Label(box, "GameFontHighlightSmall")
-        preview[i]:SetPoint("TOPLEFT", 8, -5 - i * 13)
+    local cap = Label(box, "GameFontDisableSmall", "PREVIEW"); cap:SetPoint("TOPRIGHT", -8, -6)
+    local line1 = box:CreateFontString(nil, "OVERLAY", GameTooltipHeaderText and "GameTooltipHeaderText" or "GameFontNormal")
+    line1:SetPoint("TOPLEFT", 10, -10)
+    local line2 = box:CreateFontString(nil, "OVERLAY", GameTooltipText and "GameTooltipText" or "GameFontHighlightSmall")
+    line2:SetPoint("TOPLEFT", line1, "BOTTOMLEFT", 0, -3)
+    gatherParts[#gatherParts + 1] = box
+
+    local NAME_HEX = "|cffffd100"  -- the game's gold name
+    local LEVEL_HEX = "|cffff8040" -- a sample difficulty color (orange)
+    local SAMPLE = { name = "Liferoot", skill = 150, kind = "herb" }
+
+    function UpdateTips()
+        -- The settings being edited, with a hovered menu entry swapped in.
+        local cfg = {}
+        for k, v in pairs(Cfg()) do cfg[k] = v end
+        if hover then cfg[hover[1]] = hover[2] end
+        if editingTip == "minimap" and cfg.attach ~= "skill" then cfg.place = "after" end
+        local skill = editingTip ~= "world" and cfg.attach == "skill"
+        if not cfg.on then
+            line1:SetText(NAME_HEX .. "Liferoot|r")
+            line2:SetText(editingTip == "world" and "" or (LEVEL_HEX .. "Herbalism|r"))
+        elseif skill then
+            line1:SetText(NAME_HEX .. "Liferoot|r")
+            line2:SetText(LEVEL_HEX .. FN:FormatSkillText(cfg, "150", "Herbalism") .. "|r")
+        else
+            -- The world map tooltip is our own (white text); the others keep the game's gold name.
+            local name = editingTip == "world" and "|cffffffffLiferoot|r" or (NAME_HEX .. "Liferoot|r")
+            line1:SetText(FN:FormatTipLine(SAMPLE, name, cfg, 1, 0.5, 0.25))
+            line2:SetText(editingTip == "minimap" and "" or editingTip == "overworld" and (LEVEL_HEX .. "Herbalism|r") or "")
+        end
     end
-    syncers[#syncers + 1] = UpdateTips
-    UpdateTips()
+
+    function LayoutTips()
+        PaintGather(false)
+        for _, part in ipairs(gatherParts) do part:SetShown(gatherOpen) end
+        miniTag:SetShown(gatherOpen and editingTip == "minimap")
+        local y = 30
+        if gatherOpen then
+            for i, key in ipairs(TARGETS) do if key == editingTip then targetToggle:SetPick(i) end end
+            onCheck:SetLabel(editingTip == "world" and "Show levels on world map icons"
+                or editingTip == "minimap" and "Show levels on minimap dots"
+                or "Show levels on herbs and veins")
+            -- The switch, the tick box, the settings, then the preview.
+            y = 37
+            targetToggle:ClearAllPoints(); targetToggle:SetPoint("TOP", tipPage, "TOP", 0, -y)
+            y = y + 32
+            onCheck:ClearAllPoints(); onCheck:SetPoint("TOPLEFT", 0, -y)
+            y = y + 28
+            local cfg = Cfg()
+            for _, row in ipairs(rows) do
+                -- The world map tooltip is our own one-line list: nothing to attach to.
+                local shown = not (row == attachRow and editingTip == "world")
+                row.label:SetShown(shown)
+                row.dd:SetShown(shown)
+                if shown then
+                    row.label:ClearAllPoints(); row.label:SetPoint("TOPLEFT", 0, -(y + 5))
+                    row.dd:ClearAllPoints(); row.dd:SetPoint("TOPLEFT", DD_X, -y)
+                    -- On the minimap's name line the level can only follow the name.
+                    local fixed = row == placeRow and editingTip == "minimap" and cfg.attach ~= "skill"
+                    row.label:SetAlpha(fixed and 0.4 or 1)
+                    row.dd:SetAlpha(fixed and 0.4 or 1)
+                    row.dd:EnableMouse(not fixed)
+                    y = y + 26
+                end
+            end
+            UpdateTips()
+            box:ClearAllPoints(); box:SetPoint("TOPLEFT", 0, -(y + 6))
+            y = y + 6 + box:GetHeight() + 10
+        end
+        gatherEnd:At(y)
+        tipSection.height = y + 2
+    end
+    syncers[#syncers + 1] = function() LayoutTips() end
+    LayoutTips()
 
     -- Nearby nodes -------------------------------------------------------------
     local GROUP_TOP, CIRCLE_HEIGHT, DOT_HEIGHT, RING_HEIGHT = 86, 156, 152, 122
@@ -3278,6 +3526,16 @@ local function MergeIntoMap(fallback)
     return true
 end
 
+-- How much bigger or smaller the map window is drawn than the rest of the UI. Map addons
+-- (MapUtils' corner drag, for one) scale the map window, and the quest log, being part of
+-- it, grows with it; the docked panel follows the same scale so it matches the map.
+local function MapScale()
+    local map, ui = WorldMapFrame, UIParent
+    local m, u = map and map:GetEffectiveScale(), ui and ui:GetEffectiveScale()
+    if m and u and m > 0 and u > 0 then return m / u end
+    return 1
+end
+
 local function ApplyLayout()
     local docked = ShouldDock()
     frame.docked = docked
@@ -3285,7 +3543,8 @@ local function ApplyLayout()
     -- (and its Scale slider scales all of it). So the layout is always the narrow one.
     local narrow = true
     frame.narrow = narrow
-    frame:SetScale(docked and FN.db.dockScale or FN.db.scale) -- each mode has its own scale
+    -- Each mode has its own scale; docked, it also follows the map window's.
+    frame:SetScale(docked and (FN.db.dockScale * MapScale()) or FN.db.scale)
     -- Esc closes the floating window. The side panel instead follows the map, so
     -- that closing the map with Esc does not count as closing the panel.
     SetEscCloses(not docked)
@@ -3678,6 +3937,16 @@ function FN:SetupMapPanel()
     map:HookScript("OnShow", Queue)
     map:HookScript("OnHide", Queue)
     map:HookScript("OnSizeChanged", Queue)
+    -- A map addon may rescale the map window (or something it sits in) at any time,
+    -- which no size event reports: while the map is open, refit when its scale changes.
+    local lastScale = MapScale()
+    map:HookScript("OnUpdate", function()
+        local now = MapScale()
+        if math.abs(now - lastScale) > 0.0001 then
+            lastScale = now
+            if frame and frame:IsShown() and frame.docked then Queue() end
+        end
+    end)
 
     local log = map.QuestLog
     if not log then return end
