@@ -332,7 +332,6 @@ local function SetupWorldMapButton()
             btn:SetPoint("BOTTOM", arrow, "TOP", 0, 0)
         end
     end
-    FN.PlaceMapButton = Place
     Place()
     map:HookScript("OnShow", Place)
 end

@@ -20,7 +20,7 @@ Herb, ore and fishing pool locations on the minimap and world map, with a panel 
     </td>
     <td align="center" valign="top" width="260">
       <img src="https://github.com/user-attachments/assets/158dfd14-cf13-4997-9f9c-9a69a5f03a3a" alt="Minimap with node icons and nearby dots" width="243" height="240"><br>
-      <sub>Nearby nodes turn into dots, or circles if you prefer.</sub>
+      <sub>Nearby nodes turn into a marker you design.</sub>
     </td>
   </tr>
 </table>
@@ -60,15 +60,16 @@ Open your map → **Forever Nodes** button → tick what you want. Or type `/fn`
 
 ## Hover to know
 
-- **Required skill on every tooltip:** on the world map and in the world, colored by difficulty. Peacebloom at 300? Grey. Black Lotus at 150? Red.
+- **Required skill on every tooltip:** on the world map, the minimap (experimental) and in the world, colored by difficulty. Peacebloom at 300? Grey. Black Lotus at 150? Red.
 
 <br>
 
 ## Make it yours
 
 - **Colors:** pick each profession's color.
-- **Icons:** size, round or square, dots or circles for nearby nodes.
-- **Tooltips:** level before or after the name, brackets or not, what gets colored.
+- **Icons:** size, round or square.
+- **Nearby marker:** build it from a dot, a circle and their borders, each with its own color and size. A live preview shows the result.
+- **Tooltips:** world map, minimap and overworld each set up on their own: level before or after, on the name or the skill line, brackets or a separator, what gets colored, and text size on the world map.
 - **Panel:** docked or floating, scaled to fit.
 - **Look:** native, or EllesmereUI's automatically.
 

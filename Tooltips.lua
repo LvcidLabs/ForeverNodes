@@ -1,4 +1,4 @@
-local ADDON, FN = ...
+local _, FN = ...
 
 -- Tooltips: the skill a herb or vein needs, in its difficulty color.
 --   World map: hovering our icons shows one line per node type under the cursor.
@@ -28,10 +28,11 @@ end
 --   style   "none" (150), "round" ((150)), "square" ([150]) or "separator" (150 | Liferoot)
 --   color   what takes the difficulty color: "level", "brackets" (level and its brackets or
 --           separator), "name", "line" or "none"
+--   size    (world only) the text size of every line
 local TIP_DEFAULTS = {
-    world = { on = true, attach = "name", place = "before", style = "none", color = "level" },
+    world = { on = false, attach = "name", place = "before", style = "square", color = "brackets", size = 11 },
     minimap = { on = true, attach = "name", place = "after", style = "none", color = "level" },
-    overworld = { on = true, attach = "name", place = "before", style = "none", color = "level" },
+    overworld = { on = true, attach = "skill", place = "before", style = "square", color = "brackets" },
 }
 function FN:TipCfg(target)
     local db = FN.db
@@ -44,6 +45,8 @@ function FN:TipCfg(target)
         db.tips.world = { on = db.tipWorldMap ~= false, place = place, style = style, color = color }
         db.tips.overworld = { on = db.tipOverworld ~= false, attach = db.tipOverworldLine == "skill" and "skill" or "name",
             place = place, style = style, color = color }
+        db.tipWorldMap, db.tipOverworld, db.tipOverworldLine, db.tipMinimap = nil, nil, nil, nil
+        db.tipBrackets, db.tipPosition, db.tipColor = nil, nil, nil
     end
     local t = db.tips[target]
     if type(t) ~= "table" then t = {}; db.tips[target] = t end
@@ -101,6 +104,8 @@ end
 
 -- World map ---------------------------------------------------------------------------------
 
+local resized -- the tooltip lines given a new size, with the fonts they had: { [line] = { font, size, flags } }
+
 function FN:ShowWorldTip(owner)
     local cfg = FN:TipCfg("world")
     if not cfg.on then return end
@@ -127,7 +132,34 @@ function FN:ShowWorldTip(owner)
         end
     end
     GameTooltip:Show()
+    -- Every line the same size (the game draws the first line larger, as a title). Done once
+    -- the tooltip is up: UI skins (EllesmereUI) set their own fonts as it opens. Their font face
+    -- is kept; only the size changes. The game's tooltip is shared, so the lines get their own
+    -- fonts back once it moves on.
+    local first = _G.GameTooltipTextLeft1
+    local path, _, flags = first and first:GetFont()
+    if not path then path, _, flags = GameTooltipText:GetFont() end
+    for i = 1, #lines do
+        local fs = _G["GameTooltipTextLeft" .. i]
+        if fs then
+            if not resized[i] then resized[i] = { fs:GetFont() } end
+            fs:SetFont(path, cfg.size or 11, flags)
+        end
+    end
+    GameTooltip:Show() -- already up: only re-fits its size to the new text
 end
+
+-- Gives the tooltip's lines back the fonts they had before a world map tooltip resized them.
+resized = {}
+local function RestoreFonts()
+    for i, f in pairs(resized) do
+        local fs = _G["GameTooltipTextLeft" .. i]
+        if fs and f[1] then fs:SetFont(f[1], f[2], f[3]) end
+        resized[i] = nil
+    end
+end
+GameTooltip:HookScript("OnHide", RestoreFonts)
+hooksecurefunc(GameTooltip, "SetOwner", RestoreFonts)
 
 -- Overworld ------------------------------------------------------------------------------------
 -- Runs after the game and other addons have built the tooltip. Only lines whose text is exactly

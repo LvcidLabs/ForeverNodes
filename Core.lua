@@ -26,6 +26,21 @@ local function RingTexture(line, diameter)
     return MEDIA .. "Rings\\ring" .. n
 end
 
+-- Draws a ring on `tex`: `radius` to the middle of its line, `width` px thick. Returns how
+-- wide it is across (0 when there is nothing to draw).
+local function Ring(tex, radius, width, c)
+    local across = 2 * radius + width
+    if width <= 0 or across <= 0 then
+        tex:Hide()
+        return 0
+    end
+    tex:SetTexture(RingTexture(math.min(width, across / 2), across))
+    tex:SetSize(across, across)
+    tex:SetVertexColor(c[1], c[2], c[3], c[4] or 1)
+    tex:Show()
+    return across
+end
+
 -- Professions, in display order.
 FN.kinds = { "herb", "ore", "fish" }
 FN.kindNames = { herb = "Herbalism", ore = "Mining", fish = "Fishing" }
@@ -45,35 +60,35 @@ FN.defaults = {
         minimap = { size = 15, round = true, zoom = 1.3 },
         world = { size = 16, round = false, zoom = 1.5 },
     },
-    -- Marker for a node inside the tracking range: a "circle" or a "dot".
-    nearStyle = "dot",
-    circleSize = 9,
-    circleLine = 2,                  -- line width, px
-    circleBorder = 1,                -- outline around the line, px (0 = none)
-    circleBorderColor = { 0, 0, 0 },
+    -- Marker for a node inside the tracking range, up to four parts drawn together (bottom to
+    -- top): the circle's border, the circle, the dot and the dot's border. Each part is on or
+    -- off, takes the profession's color or its own ("prof" / "custom"), and has its own size.
+    -- Ring radii are from the center to the middle of the line.
+    dotOn = true,
+    dotColorMode = "prof",
+    dotColor = { 1, 1, 1 },
     dotSize = 4,
-    dotBorder = 0.5,
-    dotBorderColor = { 0, 0, 0 },
-    -- The dot's optional second border: a thin ring around it, a little larger
-    -- than a node picture, marking where the picture was.
-    dotRing = false,
-    dotRingSize = 13,
-    dotRingWidth = 1,
-    dotRingColor = { 0, 0, 0, 0.345 }, -- black, about a third opaque
+    dotEdgeOn = true,
+    dotEdgeColorMode = "custom",
+    dotEdgeColor = { 0, 0, 0, 0.63 },
+    dotEdgeRadius = 2.25,
+    dotEdgeWidth = 1,
+    circleOn = false,
+    circleColorMode = "prof",
+    circleColor = { 0, 0, 0 },
+    circleRadius = 6.25,
+    circleWidth = 1.5,
+    circleEdgeOn = true,
+    circleEdgeColorMode = "custom",
+    circleEdgeColor = { 0, 0, 0, 0.63 },
+    circleEdgeRadius = 7.5,
+    circleEdgeWidth = 0.5,
     showAll = false, -- professions the character lacks can be opened (they are always listed, greyed)
     onlyTracked = true, -- herbs show only while Find Herbs is on, ore only while Find Minerals is on
     onlyPole = true,    -- fishing pools show only while a fishing pole is equipped
     cutoffs = true,     -- (Lvl sort) a faint line where each untrained rank ends
     azShowBeyond = true, -- (A-Z sort) list nodes beyond the current rank too
     muteAtMax = true,   -- at trained skill 300 the list drops its difficulty colors
-    tipWorldMap = true, -- world map icons show "150 Liferoot" on hover
-    tipOverworld = true, -- the game's own tooltips for herbs and veins in the world get the level
-    tipOverworldLine = "name", -- minimap and overworld: the level on the "name" line or a "skill" line ("150 Herbalism")
-    tipMinimap = true,   -- the game's minimap tooltip for a yellow dot gets the level
-    tipBrackets = "none", -- "none", "square" or "round" around the level
-    tipPosition = "before", -- level "before" or "after" the name
-    tipColor = "level",  -- what takes the difficulty color: "level", "brackets", "name", "line", "none"
-    trainerCols = { 80, 60 }, -- trainer list column widths (Trainer, Dist), account-wide
     record = true,   -- save the spot of fishing pools the character fishes from
     recordHerb = true, -- save the spot of herbs the character gathers
     recordOre = true,  -- save the spot of veins the character mines
@@ -229,6 +244,55 @@ local function Showable(node)
     return true
 end
 
+-- The in-range marker, drawn on `f` (a pin, or the settings' preview), which holds the
+-- textures halo (circle), inner (the circle's border), mark (dot) and edge (the dot's
+-- border). `color` is the profession's color. Sizes `f` to its largest part.
+function FN:DrawMarker(f, color)
+    local whole = 1
+    local function Grow(d) if d > whole then whole = d end end
+    local function Pick(mode, own) return mode == "custom" and own or color end
+
+    -- Circle, with its border underneath.
+    if db.circleOn then
+        Grow(Ring(f.halo, db.circleRadius, db.circleWidth, Pick(db.circleColorMode, db.circleColor)))
+    else
+        f.halo:Hide()
+    end
+    if db.circleEdgeOn then
+        Grow(Ring(f.inner, db.circleEdgeRadius, db.circleEdgeWidth, Pick(db.circleEdgeColorMode, db.circleEdgeColor)))
+    else
+        f.inner:Hide()
+    end
+
+    -- Dot, and its border on top of it.
+    if db.dotOn and db.dotSize > 0 then
+        local c = Pick(db.dotColorMode, db.dotColor)
+        f.mark:SetTexture(DISC)
+        f.mark:SetSize(db.dotSize, db.dotSize)
+        f.mark:SetVertexColor(c[1], c[2], c[3], c[4] or 1)
+        f.mark:Show()
+        Grow(db.dotSize)
+    else
+        f.mark:Hide()
+    end
+    if db.dotEdgeOn then
+        Grow(Ring(f.edge, db.dotEdgeRadius, db.dotEdgeWidth, Pick(db.dotEdgeColorMode, db.dotEdgeColor)))
+    else
+        f.edge:Hide()
+    end
+    f:SetSize(whole, whole)
+end
+
+-- Gives `f` the marker's textures, bottom to top: the circle's border, circle, dot, the
+-- dot's border.
+function FN:MarkerTextures(f)
+    f.inner = f:CreateTexture(nil, "BORDER", nil, 0)
+    f.halo = f:CreateTexture(nil, "BORDER", nil, 1)
+    f.mark = f:CreateTexture(nil, "ARTWORK", nil, 1)
+    f.edge = f:CreateTexture(nil, "OVERLAY")
+    for _, t in ipairs({ f.inner, f.halo, f.mark, f.edge }) do t:SetPoint("CENTER") end
+end
+
 -- Pin frames (shared by minimap and world map) -------------------------------
 
 local pool = {}
@@ -240,39 +304,7 @@ local function StylePin(pin)
     if pin.near then
         pin.bg:Hide()
         pin.icon:Hide()
-
-        -- `mark` is the colored circle or dot; `edge` is its outline, drawn underneath.
-        local size, border, borderColor, markTexture, edgeTexture
-        local ringSize = 0 -- the dot's optional second border
-        if db.nearStyle == "dot" then
-            size, border, borderColor = db.dotSize, db.dotBorder, db.dotBorderColor
-            markTexture, edgeTexture = DISC, DISC
-            if db.dotRing then ringSize = db.dotRingSize end
-        else
-            size, border, borderColor = db.circleSize, db.circleBorder, db.circleBorderColor
-            markTexture = RingTexture(db.circleLine, size)
-            edgeTexture = RingTexture(db.circleLine + 2 * border, size + 2 * border)
-        end
-        local outer = math.max(size + 2 * border, 1)
-        local whole = math.max(outer, ringSize)
-        pin:SetSize(whole, whole)
-        pin.edge:SetTexture(edgeTexture)
-        pin.edge:SetSize(outer, outer)
-        pin.edge:SetVertexColor(borderColor[1], borderColor[2], borderColor[3], borderColor[4] or 1)
-        pin.edge:SetShown(border > 0)
-        pin.mark:SetTexture(markTexture)
-        pin.mark:SetSize(math.max(size, 0.01), math.max(size, 0.01))
-        pin.mark:SetVertexColor(color[1], color[2], color[3], color[4] or 1)
-        pin.mark:SetShown(size > 0)
-        if ringSize > 0 then
-            local ringColor = db.dotRingColor
-            pin.halo:SetTexture(RingTexture(db.dotRingWidth, ringSize))
-            pin.halo:SetSize(ringSize, ringSize)
-            pin.halo:SetVertexColor(ringColor[1], ringColor[2], ringColor[3], ringColor[4] or 1)
-            pin.halo:Show()
-        else
-            pin.halo:Hide()
-        end
+        FN:DrawMarker(pin, color)
         return
     end
 
@@ -281,6 +313,7 @@ local function StylePin(pin)
     pin.mark:Hide()
     pin.edge:Hide()
     pin.halo:Hide()
+    pin.inner:Hide()
     pin.icon:SetTexture(node.icon)
     pin.icon:Show()
     if look.round then
@@ -321,14 +354,7 @@ local function AcquirePin(node, where)
         pin.mask:SetAllPoints(pin.icon)
         pin.mask:SetTexture(DISC, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
 
-        pin.halo = pin:CreateTexture(nil, "BORDER") -- the dot's second border, outermost
-        pin.halo:SetPoint("CENTER")
-
-        pin.edge = pin:CreateTexture(nil, "ARTWORK")
-        pin.edge:SetPoint("CENTER")
-
-        pin.mark = pin:CreateTexture(nil, "OVERLAY")
-        pin.mark:SetPoint("CENTER")
+        FN:MarkerTextures(pin) -- the in-range marker
     end
     pin.node = node
     pin.where = where
@@ -732,6 +758,7 @@ end
 function FN:Restyle()
     for _, pin in pairs(active) do StylePin(pin) end
     for i = 1, #mapPins do StylePin(mapPins[i]) end
+    if FN.MarkerPreview then FN:MarkerPreview() end -- the settings' sample
 end
 
 -- Startup ----------------------------------------------------------------------
@@ -739,6 +766,11 @@ end
 local function InitDB()
     ForeverNodesDB = ForeverNodesDB or {}
     db = ForeverNodesDB
+    -- A first install starts on the defaults: nothing older to carry over.
+    if next(db) == nil then
+        db.markerParts = true
+        db.tips = {} -- each tooltip then takes its own defaults (see FN:TipCfg)
+    end
     -- Fresh install: every herb and ore node is off until ticked; fishing pools
     -- start on (they only show with a pole equipped anyway).
     if type(db.enabled) ~= "table" then
@@ -792,6 +824,59 @@ local function InitDB()
         db.dock = true
         db.dockDefault = true
     end
+    -- One-time (1.2.2): the "circle or dot" choice became four parts that can show together.
+    -- Each old look is rebuilt from its own settings (or the old defaults, where one was never
+    -- saved), so markers look the same as before. The old settings are dropped afterwards.
+    if not db.markerParts then
+        local OLD = { nearStyle = "dot", circleSize = 9, circleLine = 2, circleBorder = 1,
+            circleBorderColor = { 0, 0, 0 }, dotBorder = 0.5, dotBorderColor = { 0, 0, 0 },
+            dotRing = false, dotRingSize = 13, dotRingWidth = 1, dotRingColor = { 0, 0, 0, 0.345 } }
+        local function Old(key)
+            local v = db[key]
+            if type(v) ~= type(OLD[key]) then v = OLD[key] end
+            return v
+        end
+        local function Copy(c) return { c[1], c[2], c[3], c[4] } end
+        if Old("nearStyle") == "circle" then
+            -- The old circle's size was across its outside edge.
+            local size, line, border = Old("circleSize"), Old("circleLine"), Old("circleBorder")
+            db.dotOn, db.dotEdgeOn = false, false
+            db.circleOn, db.circleColorMode = true, "prof"
+            db.circleWidth = line
+            db.circleRadius = size / 2 - line / 2
+            -- Its outline ran along both sides of the line, touching it: one wider ring under
+            -- the circle, showing on each side of it, looks the same.
+            db.circleEdgeOn = border > 0
+            db.circleEdgeColorMode, db.circleEdgeColor = "custom", Copy(Old("circleBorderColor"))
+            db.circleEdgeRadius = db.circleRadius
+            db.circleEdgeWidth = line + 2 * border
+        else
+            local border = Old("dotBorder")
+            db.dotOn, db.dotColorMode = true, "prof"
+            -- The old border showed just outside the dot.
+            db.dotEdgeOn = border > 0
+            db.dotEdgeColorMode, db.dotEdgeColor = "custom", Copy(Old("dotBorderColor"))
+            if border > 0 then db.dotEdgeWidth = border end
+            db.dotEdgeRadius = db.dotSize / 2 + db.dotEdgeWidth / 2
+            -- The old second ring becomes the circle, in its own color.
+            local ringWidth = Old("dotRingWidth")
+            db.circleOn = Old("dotRing")
+            db.circleColorMode, db.circleColor = "custom", Copy(Old("dotRingColor"))
+            db.circleWidth = ringWidth
+            db.circleRadius = Old("dotRingSize") / 2 - ringWidth / 2
+            db.circleEdgeOn = false
+        end
+        for key in pairs(OLD) do db[key] = nil end
+        db.markerParts = true
+    end
+    -- Settings no longer used (older versions, and 1.2.2 test builds).
+    db.trainerCols, db.mapButtonSide, db.tipMinimap = nil, nil, nil
+    db.circleEdgeSides, db.circleEdgeDistance, db.markerEdgeRing = nil, nil, nil
+    if type(db.tips) == "table" then -- the 1.2.1 tooltip settings, once carried over (FN:TipCfg)
+        db.tipWorldMap, db.tipOverworld, db.tipOverworldLine = nil, nil, nil
+        db.tipBrackets, db.tipPosition, db.tipColor = nil, nil, nil
+    end
+
     if type(db.colors) ~= "table" then db.colors = {} end
     for kind, color in pairs(FN.defaults.colors) do
         if type(db.colors[kind]) ~= "table" then
@@ -875,7 +960,7 @@ driver:SetScript("OnEvent", function(self, event, arg1)
             end
         end
         FN:SetupButtons()
-        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.2.2"
+        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.3.0"
         -- Gold name, white version, gold author; the hint goes on its own indented line.
         -- The yellow star is the game's own raid target marker, drawn at text height.
         print(("|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t |cffffd100Forever Nodes|r |cffffffffv%s by Lvcid|r"

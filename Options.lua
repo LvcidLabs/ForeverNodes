@@ -356,36 +356,6 @@ local function IconTab(parent, icon, onClick)
     return b
 end
 
--- One choice of a pick-one control: a rounded square, lit when it is the active choice.
-local function Segment(parent, text, width, onClick)
-    if Stock() then
-        local stock = StockButton(parent, text, width, 22, onClick)
-        if stock then return stock end
-    end
-    local b = CreateFrame("Button", nil, parent)
-    b:SetSize(width, 22)
-    b.bg = Rounded(b, "BACKGROUND", "round_fill")
-    b.edge = Rounded(b, "BORDER", "round_edge")
-    local hl = Rounded(b, "HIGHLIGHT", "round_fill")
-    hl:SetVertexColor(1, 1, 1, 0.10)
-    b.text = Label(b, "GameFontHighlightSmall", text)
-    b.text:SetPoint("CENTER")
-    b:SetScript("OnClick", onClick)
-    KeepChatFocus(b)
-    function b:SetSelected(selected)
-        if selected then
-            self.bg:SetVertexColor(BRONZE[1], BRONZE[2], BRONZE[3], 0.60)
-            self.edge:SetVertexColor(GOLD[1], GOLD[2], GOLD[3], 0.90)
-            self.text:SetTextColor(1, 1, 1)
-        else
-            self.bg:SetVertexColor(1, 1, 1, 0.05)
-            self.edge:SetVertexColor(1, 1, 1, 0.25)
-            self.text:SetTextColor(MUTED[1], MUTED[2], MUTED[3])
-        end
-    end
-    return b
-end
-
 -- A two-way switch: one button reading "left | right" with the active half lit.
 -- :SetRight(true or false) lights a half; a click is left to `onClick` (which flips it).
 local function PairToggle(parent, leftText, rightText, onClick)
@@ -557,7 +527,13 @@ local function Check(parent, text, get, set)
         self:SetWidth(label:GetStringWidth() + 24)
     end
     c:SetScript("OnEnter", function() label:SetTextColor(GOLD[1], GOLD[2], GOLD[3]) end)
-    c:SetScript("OnLeave", function() label:SetTextColor(1, 1, 1) end)
+    -- `c.restColor` ({ r, g, b }) gives the label a color of its own when not hovered.
+    local function Rest()
+        local rc = c.restColor
+        if rc then label:SetTextColor(rc[1], rc[2], rc[3]) else label:SetTextColor(1, 1, 1) end
+    end
+    c.Rest = Rest
+    c:SetScript("OnLeave", Rest)
     local function Sync() mark:SetShown(get() and true or false) end
     c:SetScript("OnClick", function()
         set(not get())
@@ -605,6 +581,18 @@ local function Slider(parent, text, minValue, maxValue, step, fmt, get, set, onR
         thumb:SetColorTexture(BRONZE[1], BRONZE[2], BRONZE[3])
         thumb:SetSize(8, 14)
         s:SetThumbTexture(thumb)
+        -- The thumb lightens a touch under the mouse, and goes near white while held.
+        local hovered, held = false, false
+        local function Paint()
+            local w = held and 0.7 or hovered and 0.2 or 0
+            thumb:SetColorTexture(BRONZE[1] + (1 - BRONZE[1]) * w, BRONZE[2] + (1 - BRONZE[2]) * w,
+                BRONZE[3] + (1 - BRONZE[3]) * w)
+        end
+        s:HookScript("OnEnter", function() hovered = true; Paint() end)
+        s:HookScript("OnLeave", function() hovered = false; Paint() end)
+        s:HookScript("OnMouseDown", function() held = true; Paint() end)
+        s:HookScript("OnMouseUp", function() held = false; Paint() end)
+        s:HookScript("OnHide", function() hovered, held = false, false; Paint() end)
     end
     s:SetOrientation("HORIZONTAL")
     s:SetPoint("BOTTOMLEFT")
@@ -616,10 +604,12 @@ local function Slider(parent, text, minValue, maxValue, step, fmt, get, set, onR
     if s.SetObeyStepOnDrag then s:SetObeyStepOnDrag(true) end
 
     local function Snapped(v) return floor(v / step + 0.5) * step end
+    -- `fmt` is a format string, or a function turning the value into its text.
+    local function Text(v) return type(fmt) == "function" and fmt(v) or fmt:format(v) end
     local syncing = false
     s:SetScript("OnValueChanged", function(_, v)
         v = Snapped(v)
-        value:SetText(fmt:format(v))
+        value:SetText(Text(v))
         if not syncing and not onRelease and v ~= get() then set(v) end
     end)
     if onRelease then
@@ -628,17 +618,18 @@ local function Slider(parent, text, minValue, maxValue, step, fmt, get, set, onR
             if v ~= get() then set(v) end
         end)
     end
+    holder.slider, holder.value = s, value -- for callers that lay it out their own way
     holder.Sync = function()
         syncing = true
         s:SetValue(get())
-        value:SetText(fmt:format(get()))
+        value:SetText(Text(get()))
         syncing = false
     end
     syncers[#syncers + 1] = holder.Sync
     return holder
 end
 
--- Color picker extras: a hex box and Copy / Paste, attached under the game's picker.
+-- Color picker extras: one hex box (with opacity) and Copy / Paste, in the game's picker.
 
 local function ColorToHex(c)
     local function Byte(v) return floor(v * 255 + 0.5) end
@@ -672,26 +663,26 @@ local pickerExtras, copiedColor
 
 local function PickerExtras()
     if pickerExtras then return pickerExtras end
+    -- The game's picker has its own six-digit hex box. Ours takes its place in the window: one
+    -- box, wide enough for the opacity too (RRGGBBAA), following the picker as it moves and
+    -- moving the picker as a valid color is typed. Copy and Paste sit above it.
+    local stockHex = ColorPickerFrame.Content and ColorPickerFrame.Content.HexBox
     local f = CreateFrame("Frame", nil, ColorPickerFrame)
-    f:SetSize(252, 36)
-    f:SetPoint("TOP", ColorPickerFrame, "BOTTOM", 0, -2)
-    f:EnableMouse(true)
-    local bg = Fill(f, "BACKGROUND", 0.07, 0.055, 0.04, 0.96)
-    bg:SetAllPoints()
-    Outline(f, f, BRONZE[1] * 0.6, BRONZE[2] * 0.6, BRONZE[3] * 0.6, 1)
-
     local hash = Label(f, nil, "#")
-    hash:SetPoint("LEFT", 12, 0)
     local box = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-    box:SetSize(76, 20)
-    box:SetPoint("LEFT", hash, "RIGHT", 9, 0)
     box:SetAutoFocus(false)
     box:SetMaxLetters(9)
-    box:SetScript("OnEnterPressed", function(self)
+    box:SetScript("OnTextChanged", function(self, typed)
+        if not typed then return end
         local r, g, b, a = HexToColor(self:GetText())
-        self:ClearFocus()
-        if r then f.set(r, g, b, a) else f.sync() end
+        if r then f.set(r, g, b, a) end
     end)
+    box:SetScript("OnEnterPressed", function(self)
+        self:ClearFocus()
+        f.sync()
+    end)
+    -- Clicking in selects the whole value, ready for Ctrl+C, or to type or Ctrl+V over.
+    box:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
     box:SetScript("OnEscapePressed", function(self)
         self:ClearFocus()
         f.sync()
@@ -702,11 +693,56 @@ local function PickerExtras()
         local c = f.color
         copiedColor = { c[1], c[2], c[3], c[4] or 1 }
     end)
-    copy:SetPoint("LEFT", box, "RIGHT", 12, 0)
     local paste = Card(f, "Paste", 58, 22, function()
         if copiedColor then f.set(copiedColor[1], copiedColor[2], copiedColor[3], copiedColor[4]) end
     end)
-    paste:SetPoint("LEFT", copy, "RIGHT", 4, 0)
+    -- Addons cannot reach the system clipboard: these carry a color between pickers here.
+    local function Tip(button, title, text)
+        button:HookScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(title)
+            GameTooltip:AddLine(text, 1, 1, 1, true)
+            GameTooltip:AddLine("For the system clipboard, click the hex box and use Ctrl+C / Ctrl+V.", 0.6, 0.6, 0.6, true)
+            GameTooltip:Show()
+        end)
+        button:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+    Tip(copy, "Copy color", "Remembers this color, to paste into another color in Forever Nodes.")
+    Tip(paste, "Paste color", "Uses the color last copied with Copy.")
+
+    if stockHex then
+        -- Inside the window, where the game's box was. That one steps aside only while our
+        -- box is up, so the picker is unchanged when something else opens it.
+        f:SetAllPoints(ColorPickerFrame)
+        f:SetFrameLevel(stockHex:GetFrameLevel() + 5)
+        local function GameBox(on)
+            stockHex:SetAlpha(on and 1 or 0)
+            stockHex:EnableMouse(on)
+            if stockHex.EnableKeyboard then stockHex:EnableKeyboard(on) end
+        end
+        f:SetScript("OnShow", function() GameBox(false) end)
+        f:SetScript("OnHide", function() GameBox(true) end)
+        GameBox(false)
+        box:SetSize(78, 20)
+        box:SetFontObject(GameFontHighlightSmall) -- all eight digits fit
+        box:SetPoint("RIGHT", stockHex, "RIGHT", 0, 0)
+        hash:SetPoint("RIGHT", box, "LEFT", -5, 0)
+        paste:SetPoint("BOTTOMRIGHT", box, "TOPRIGHT", 2, 10)
+        copy:SetPoint("BOTTOMRIGHT", paste, "TOPRIGHT", 0, 4)
+    else
+        -- An older picker with no hex box of its own: a strip under the window.
+        f:SetSize(252, 36)
+        f:SetPoint("TOP", ColorPickerFrame, "BOTTOM", 0, -2)
+        f:EnableMouse(true)
+        local bg = Fill(f, "BACKGROUND", 0.07, 0.055, 0.04, 0.96)
+        bg:SetAllPoints()
+        Outline(f, f, BRONZE[1] * 0.6, BRONZE[2] * 0.6, BRONZE[3] * 0.6, 1)
+        hash:SetPoint("LEFT", 12, 0)
+        box:SetSize(76, 20)
+        box:SetPoint("LEFT", hash, "RIGHT", 9, 0)
+        copy:SetPoint("LEFT", box, "RIGHT", 12, 0)
+        paste:SetPoint("LEFT", copy, "RIGHT", 4, 0)
+    end
 
     ColorPickerFrame:HookScript("OnHide", function() f:Hide() end)
     pickerExtras = f
@@ -767,12 +803,46 @@ local function Swatch(parent, text, getColor)
     local chip = Fill(b, "ARTWORK", 1, 1, 1)
     chip:SetSize(26, 14)
     chip:SetPoint("LEFT")
-    Outline(b, chip, 0, 0, 0, 1)
+    -- Edged like the settings' dividing lines, a little lighter: a color that can be clicked.
+    if Stock() then Outline(b, chip, 0.44, 0.31, 0.17, 1) else Outline(b, chip, 1, 1, 1, 0.34) end
     local label = Label(b, nil, text)
     label:SetPoint("LEFT", chip, "RIGHT", 7, 0)
     b:SetSize(label:GetStringWidth() + 36, 20)
-    b:SetScript("OnEnter", function() label:SetTextColor(GOLD[1], GOLD[2], GOLD[3]) end)
-    b:SetScript("OnLeave", function() label:SetTextColor(1, 1, 1) end)
+    -- Hover: a thin, soft gold edge fades in around the color, to show it can be clicked.
+    local glow = CreateFrame("Frame", nil, b)
+    glow:SetPoint("TOPLEFT", chip, "TOPLEFT", -1, 1)
+    glow:SetPoint("BOTTOMRIGHT", chip, "BOTTOMRIGHT", 1, -1)
+    -- Three faint rings, fading outward, so it reads as a glow and not a frame.
+    Outline(glow, glow, GOLD[1], GOLD[2], GOLD[3], 0.38)
+    for i, alpha in ipairs({ 0.16, 0.06 }) do
+        local halo = CreateFrame("Frame", nil, glow)
+        halo:SetPoint("TOPLEFT", -i, i)
+        halo:SetPoint("BOTTOMRIGHT", i, -i)
+        Outline(halo, halo, GOLD[1], GOLD[2], GOLD[3], alpha)
+    end
+    glow:SetAlpha(0)
+    -- The fade runs only while it moves, so idle swatches cost nothing per frame.
+    local target = 0
+    local function Fade(self, elapsed)
+        local a = self:GetAlpha()
+        local step = elapsed / 0.12
+        a = target > a and math.min(target, a + step) or math.max(target, a - step)
+        self:SetAlpha(a)
+        if a == target then self:SetScript("OnUpdate", nil) end
+    end
+    local function FadeTo(to)
+        target = to
+        glow:SetScript("OnUpdate", Fade)
+    end
+    b:SetScript("OnEnter", function()
+        label:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+        FadeTo(1)
+    end)
+    b:SetScript("OnLeave", function()
+        label:SetTextColor(1, 1, 1)
+        FadeTo(0)
+    end)
+    b:HookScript("OnHide", function() target = 0; glow:SetScript("OnUpdate", nil); glow:SetAlpha(0) end)
     local function Sync()
         local c = getColor()
         chip:SetColorTexture(c[1], c[2], c[3], c[4] or 1)
@@ -1069,10 +1139,13 @@ tweener:SetScript("OnUpdate", function(_, elapsed)
             if tw.done then tw.done() end
         end
     end
+    if not next(tweens) then tweener:Hide() end -- nothing fading: no per-frame work
 end)
+tweener:Hide()
 local function FadeTo(region, to, dur, done)
     if dur <= 0 then tweens[region] = nil; region:SetAlpha(to); if done then done() end return end
     tweens[region] = { from = region:GetAlpha(), to = to, dur = dur, t = 0, done = done }
+    tweener:Show()
 end
 
 -- Draws an atlas cropped to its top-right `w` x `h` pixels (pinned top-right, never scaled).
@@ -1096,31 +1169,6 @@ local function CropAtlas(tex, atlas, w, h, inset, down)
     tex:Show()
 end
 
--- An atlas drawn in three slices: fixed left and right caps, a stretched middle.
-local function ThreeSlice(parent, layer, sub)
-    local s = { parent:CreateTexture(nil, layer, nil, sub), parent:CreateTexture(nil, layer, nil, sub),
-        parent:CreateTexture(nil, layer, nil, sub) }
-    function s:Set(atlas, width, cap)
-        local info = C_Texture.GetAtlasInfo(atlas)
-        if not info then for i = 1, 3 do self[i]:Hide() end return end
-        local W, H = info.width, info.height
-        local l, r, t, b = info.leftTexCoord, info.rightTexCoord, info.topTexCoord, info.bottomTexCoord
-        local c = (r - l) * cap / W
-        for i = 1, 3 do self[i]:SetTexture(info.file); self[i]:SetHeight(H); self[i]:Show() end
-        self[1]:SetTexCoord(l, l + c, t, b); self[1]:SetWidth(cap)
-        self[3]:SetTexCoord(r - c, r, t, b); self[3]:SetWidth(cap)
-        self[2]:SetTexCoord(l + c, r - c, t, b); self[2]:SetWidth(math.max(1, width - 2 * cap))
-        self.height = H
-    end
-    function s:Anchor(point, rel, x, y)
-        self[1]:ClearAllPoints(); self[1]:SetPoint(point, rel, point, x, y)
-        self[2]:ClearAllPoints(); self[2]:SetPoint("LEFT", self[1], "RIGHT")
-        self[3]:ClearAllPoints(); self[3]:SetPoint("LEFT", self[2], "RIGHT")
-    end
-    function s:SetVertexColor(r, g, b) for i = 1, 3 do self[i]:SetVertexColor(r, g, b) end end
-    return s
-end
-
 local COIN = {
     "|TInterface\\MoneyFrame\\UI-GoldIcon:13:13:2:0|t",
     "|TInterface\\MoneyFrame\\UI-SilverIcon:13:13:2:0|t",
@@ -1135,17 +1183,6 @@ local function Money(copper)
         if parts[i] > 0 then out[#out + 1] = parts[i] .. COIN[i] end
     end
     return table.concat(out, "  ")
-end
-
--- "5g", "4g 50s", "45s": short money text with the game's coin colors on the letters.
-local function ShortMoney(c)
-    if c == 0 then return "|cff9d9d9dfree|r" end
-    local g, sv, cp = math.floor(c / 10000), math.floor(c % 10000 / 100), c % 100
-    local out = {}
-    if g > 0 then out[#out + 1] = g .. "|cffffd100g|r" end
-    if sv > 0 then out[#out + 1] = sv .. "|cffc7c7cfs|r" end
-    if cp > 0 then out[#out + 1] = cp .. "|cffeda55fc|r" end
-    return table.concat(out, " ")
 end
 
 -- Under 1000 yards it counts every yard; above that it rounds to thousands ("14k yd").
@@ -1257,6 +1294,12 @@ local function BuildHeader(page)
     bar.text = bar.over:CreateFontString(nil, "OVERLAY", _G.Number12FontOutline and "Number12FontOutline" or "GameFontHighlightSmall")
     bar.text:SetPoint("CENTER", bar, "TOPLEFT", 0, 0) -- placed in Layout: centered on the whole bar
     bar.text:SetShadowOffset(1, -1)
+    -- The same size as the cue line (View trainers, ...) and the other text on the bar.
+    do
+        local font, _, flags = bar.text:GetFont()
+        local _, small = GameFontHighlightSmall:GetFont()
+        if font and small then bar.text:SetFont(font, small, flags) end
+    end
     bar.cue = CreateFrame("Frame", nil, bar)
     bar.cue:SetPoint("TOPLEFT", bar, "TOPLEFT", 2, -3)
     bar.cue:SetPoint("BOTTOMRIGHT", bar, "TOPRIGHT", -2, -3 - FILL_H)
@@ -1614,7 +1657,6 @@ local function Smaller(fs, by)
     local file, size, flags = fs:GetFont()
     if file and size then fs:SetFont(file, math.max(8, size - (by or 1)), flags) end
 end
-local PRICE_W = 64
 local trainerSort = { by = "dist", dir = 1 } -- this session only (resets on reload)
 local LOC_DIM = "|cff8d8b86"
 
@@ -2240,15 +2282,6 @@ end
 
 -- Settings page ----------------------------------------------------------------
 
-local function Header(page, text, x, y)
-    local fs = Label(page, "GameFontNormal", text)
-    fs:SetPoint("TOPLEFT", x, y)
-    local line = Fill(page, "ARTWORK", BRONZE[1], BRONZE[2], BRONZE[3], 0.35)
-    line:SetHeight(1)
-    line:SetPoint("TOPLEFT", x, y - 18)
-    line:SetWidth(250)
-end
-
 -- Two blocks of settings: side by side in the floating window, stacked when docked.
 -- Each block is a stack of collapsible sections, so both heights change as
 -- sections are opened and closed (and with which marker options are showing).
@@ -2678,9 +2711,10 @@ local function BuildSettingsPage(columnA, columnB)
     syncers[#syncers + 1] = LayoutProf
 
     -- Tooltips -----------------------------------------------------------------
-    -- One fold per kind of thing (only Herbalism & Mining for now). Inside it, a switch picks
-    -- which tooltip is being set up (world map, minimap or overworld), each with its own
-    -- settings, and a sample tooltip follows every choice (hovering a menu entry previews it).
+    -- On top, which tooltips show levels at all. Under them, the Tooltip Customization fold:
+    -- a switch picks which tooltip is being set up (world map, minimap or overworld), each with
+    -- its own settings, and a sample tooltip follows every choice (hovering a menu entry
+    -- previews it).
     local tipSection
     tipSection, page = Add(sectionsA, columnA, "tooltips", "Tooltips", 200)
     local tipPage = page
@@ -2689,12 +2723,37 @@ local function BuildSettingsPage(columnA, columnB)
     local hover -- { key, value } while a menu entry is hovered: shown in the preview only
     local function Cfg() return FN:TipCfg(editingTip) end
 
+    -- Which tooltips show levels: one tick box each, for all of them at once.
+    local TIP_CHECKS = { { "world", "World map tooltips" }, { "minimap", "Minimap tooltips" },
+        { "overworld", "Overworld tooltips" } }
+    local tipChecks = {}
+    for i, t in ipairs(TIP_CHECKS) do
+        local box = Check(page, t[2],
+            function() return FN:TipCfg(t[1]).on end,
+            function(v)
+                FN:TipCfg(t[1]).on = v and true or false
+                if t[1] == "world" then FN:Refresh() end
+                UpdateTips()
+            end)
+        box:SetPoint("TOPLEFT", 0, -(i - 1) * 24)
+        tipChecks[t[1]] = box
+    end
+    -- The minimap's herb is worked out from where the cursor is (the game hides its name).
+    local miniTag = Label(tipChecks.minimap, "GameFontNormalSmall", "EXPERIMENTAL")
+    miniTag:SetTextColor(1, 0.25, 0.25)
+    do
+        local font, size, flags = miniTag:GetFont()
+        if font and size then miniTag:SetFont(font, math.max(size - 2, 8), flags) end
+    end
+    miniTag:SetPoint("LEFT", tipChecks.minimap, "RIGHT", 2, 0)
+    local FOLD_TOP = #TIP_CHECKS * 24 + 4 -- where the fold starts, under the tick boxes
+
     -- The fold: a centered label, gold on hover, like Advanced Minimap Settings.
-    local gatherOpen = true
+    local gatherOpen = false -- starts closed, like the other folds
     local gather = CreateFrame("Button", nil, page)
     gather:SetSize(220, 20)
-    gather:SetPoint("TOP", page, "TOP", 0, -6)
-    local gatherText = Label(gather, "GameFontDisable", "Herbalism & Mining")
+    gather:SetPoint("TOP", page, "TOP", 0, -(FOLD_TOP + 6))
+    local gatherText = Label(gather, "GameFontDisable", "Tooltip Customization")
     gatherText:SetPoint("CENTER")
     SideLines(gather, gatherText)
     local function PaintGather(lit)
@@ -2710,8 +2769,8 @@ local function BuildSettingsPage(columnA, columnB)
     end)
     local gatherParts = {} -- everything inside the fold
     -- A line above and below the label, border to border, like the one above Advanced Minimap
-    -- Settings (and in the section border's color), so it reads as its own sub-section even
-    -- with general tooltip settings above it later.
+    -- Settings (and in the section border's color), so it reads as its own sub-section under
+    -- the tick boxes.
     -- (Drawn on a frame of their own, above the section's other contents.)
     local lineFrame = CreateFrame("Frame", nil, page)
     lineFrame:SetAllPoints(page)
@@ -2727,9 +2786,9 @@ local function BuildSettingsPage(columnA, columnB)
         t:At(y)
         return t
     end
-    GatherLine(2)
+    GatherLine(FOLD_TOP + 2)
     -- The closing line: under the label when closed, under everything in the fold when open.
-    local gatherEnd = GatherLine(30)
+    local gatherEnd = GatherLine(FOLD_TOP + 30)
 
     -- Which tooltip: one switch, like Maps & Icons' "Minimap | World map", with three parts.
     local TARGETS = { "world", "minimap", "overworld" }
@@ -2740,27 +2799,8 @@ local function BuildSettingsPage(columnA, columnB)
         LayoutTips()
         Relayout(true)
     end)
-    targetToggle:SetPoint("TOP", page, "TOP", 0, -26)
+    targetToggle:SetPoint("TOP", page, "TOP", 0, -(FOLD_TOP + 26))
     gatherParts[#gatherParts + 1] = targetToggle
-
-    -- Shown at all, for the tooltip being edited.
-    local onCheck = Check(page, "",
-        function() return Cfg().on end,
-        function(v)
-            Cfg().on = v and true or false
-            if editingTip == "world" then FN:Refresh() end
-            UpdateTips()
-        end)
-    onCheck:SetPoint("TOPLEFT", 0, -56)
-    gatherParts[#gatherParts + 1] = onCheck
-    -- The minimap's herb is worked out from where the cursor is (the game hides its name).
-    local miniTag = Label(onCheck, "GameFontNormalSmall", "EXPERIMENTAL")
-    miniTag:SetTextColor(1, 0.25, 0.25)
-    do
-        local font, size, flags = miniTag:GetFont()
-        if font and size then miniTag:SetFont(font, math.max(size - 2, 8), flags) end
-    end
-    miniTag:SetPoint("LEFT", onCheck, "RIGHT", 2, 0)
 
     -- A dropdown for one setting of the tooltip being edited. `entries` is a list of
     -- { value, text } or a function returning one (for wording that follows other choices).
@@ -2859,6 +2899,19 @@ local function BuildSettingsPage(columnA, columnB)
         }
     end)
 
+    -- Text size: the world map tooltip is our own, so all of its lines can be set larger or
+    -- smaller together.
+    local sizeRow = Slider(page, "Text size", 8, 20, 1, "%d",
+        function() return Cfg().size or 11 end,
+        function(v) Cfg().size = v; LayoutTips(); Relayout(true) end) -- the preview grows with it
+    sizeRow:SetHeight(20)
+    sizeRow.label:ClearAllPoints(); sizeRow.label:SetPoint("LEFT")
+    sizeRow.value:ClearAllPoints(); sizeRow.value:SetPoint("RIGHT")
+    sizeRow.slider:ClearAllPoints()
+    sizeRow.slider:SetPoint("LEFT", sizeRow, "LEFT", DD_X, 0)
+    sizeRow.slider:SetPoint("RIGHT", sizeRow, "RIGHT", -30, 0)
+    gatherParts[#gatherParts + 1] = sizeRow
+
     -- Preview: a sample tooltip for the one being edited.
     local box = CreateFrame("Frame", nil, page)
     box:SetSize(234, 52)
@@ -2875,6 +2928,9 @@ local function BuildSettingsPage(columnA, columnB)
     local NAME_HEX = "|cffffd100"  -- the game's gold name
     local LEVEL_HEX = "|cffff8040" -- a sample difficulty color (orange)
     local SAMPLE = { name = "Liferoot", skill = 150, kind = "herb" }
+    local SAMPLE2 = { name = "Kingsblood", skill = 125, kind = "herb" } -- the world map's second line
+    local headerFont = GameTooltipHeaderText and GameTooltipHeaderText or GameFontNormal
+    local textFont = GameTooltipText and GameTooltipText or GameFontHighlightSmall
 
     function UpdateTips()
         -- The settings being edited, with a hovered menu entry swapped in.
@@ -2883,9 +2939,23 @@ local function BuildSettingsPage(columnA, columnB)
         if hover then cfg[hover[1]] = hover[2] end
         if editingTip == "minimap" and cfg.attach ~= "skill" then cfg.place = "after" end
         local skill = editingTip ~= "world" and cfg.attach == "skill"
+        -- The world map's lines all take its text size; the others look like the game's.
+        if editingTip == "world" then
+            local path, _, flags = textFont:GetFont()
+            line1:SetFont(path, cfg.size or 11, flags)
+            line2:SetFont(path, cfg.size or 11, flags)
+        else
+            -- Explicit sizes stick over a font object, so set the game's sizes back explicitly.
+            line1:SetFont(headerFont:GetFont())
+            line2:SetFont(textFont:GetFont())
+        end
         if not cfg.on then
             line1:SetText(NAME_HEX .. "Liferoot|r")
             line2:SetText(editingTip == "world" and "" or (LEVEL_HEX .. "Herbalism|r"))
+        elseif editingTip == "world" then
+            -- Two nodes under the cursor, one line each.
+            line1:SetText(FN:FormatTipLine(SAMPLE2, "|cffffffffKingsblood|r", cfg, 1, 1, 0))
+            line2:SetText(FN:FormatTipLine(SAMPLE, "|cffffffffLiferoot|r", cfg, 1, 0.5, 0.25))
         elseif skill then
             line1:SetText(NAME_HEX .. "Liferoot|r")
             line2:SetText(LEVEL_HEX .. FN:FormatSkillText(cfg, "150", "Herbalism") .. "|r")
@@ -2895,24 +2965,22 @@ local function BuildSettingsPage(columnA, columnB)
             line1:SetText(FN:FormatTipLine(SAMPLE, name, cfg, 1, 0.5, 0.25))
             line2:SetText(editingTip == "minimap" and "" or editingTip == "overworld" and (LEVEL_HEX .. "Herbalism|r") or "")
         end
+        -- Tall enough for its lines at any text size (never less than it was).
+        local h = 10 + line1:GetStringHeight() + 10
+        if (line2:GetText() or "") ~= "" then h = h + 3 + line2:GetStringHeight() end
+        box:SetHeight(math.max(52, math.ceil(h)))
     end
 
     function LayoutTips()
         PaintGather(false)
         for _, part in ipairs(gatherParts) do part:SetShown(gatherOpen) end
-        miniTag:SetShown(gatherOpen and editingTip == "minimap")
-        local y = 30
+        local y = FOLD_TOP + 30
         if gatherOpen then
             for i, key in ipairs(TARGETS) do if key == editingTip then targetToggle:SetPick(i) end end
-            onCheck:SetLabel(editingTip == "world" and "Show levels on world map icons"
-                or editingTip == "minimap" and "Show levels on minimap dots"
-                or "Show levels on herbs and veins")
-            -- The switch, the tick box, the settings, then the preview.
-            y = 37
+            -- The switch, the settings, then the preview.
+            y = FOLD_TOP + 37
             targetToggle:ClearAllPoints(); targetToggle:SetPoint("TOP", tipPage, "TOP", 0, -y)
-            y = y + 32
-            onCheck:ClearAllPoints(); onCheck:SetPoint("TOPLEFT", 0, -y)
-            y = y + 28
+            y = y + 34
             local cfg = Cfg()
             for _, row in ipairs(rows) do
                 -- The world map tooltip is our own one-line list: nothing to attach to.
@@ -2930,6 +2998,12 @@ local function BuildSettingsPage(columnA, columnB)
                     y = y + 26
                 end
             end
+            sizeRow:SetShown(editingTip == "world")
+            if editingTip == "world" then
+                sizeRow:ClearAllPoints(); sizeRow:SetPoint("TOPLEFT", 0, -(y + 1))
+                sizeRow:SetWidth(tipPage:GetWidth() > 0 and tipPage:GetWidth() or 234)
+                y = y + 26
+            end
             UpdateTips()
             box:ClearAllPoints(); box:SetPoint("TOPLEFT", 0, -(y + 6))
             y = y + 6 + box:GetHeight() + 10
@@ -2941,10 +3015,9 @@ local function BuildSettingsPage(columnA, columnB)
     LayoutTips()
 
     -- Nearby nodes -------------------------------------------------------------
-    local GROUP_TOP, CIRCLE_HEIGHT, DOT_HEIGHT, RING_HEIGHT = 86, 156, 152, 122
     local nearby
-    nearby, page = Add(sectionsB, columnB, "nearby", "Nearby nodes", GROUP_TOP + CIRCLE_HEIGHT)
-    local rangeLabel = Label(page, nil, "Switch to a marker within")
+    nearby, page = Add(sectionsB, columnB, "nearby", "Nearby nodes", 300)
+    local rangeLabel = Label(page, nil, "Range")
     rangeLabel:SetPoint("TOPLEFT", 0, -6)
     local range = CreateFrame("EditBox", nil, page, "InputBoxTemplate")
     range:SetSize(36, 20)
@@ -2970,78 +3043,359 @@ local function BuildSettingsPage(columnA, columnB)
         self:ClearFocus()
     end)
     syncers[#syncers + 1] = function() range:SetText(db.range) end
-    local yards = Label(page, nil, "yards")
+    local yards = Label(page, nil, "yds")
     yards:SetPoint("LEFT", range, "RIGHT", 6, 0)
     local hint = Label(page, "GameFontDisableSmall",
         "Nodes officially appear at " .. FN.DEFAULT_RANGE .. " yds")
     hint:SetPoint("TOPLEFT", 0, -29)
 
-    -- Marker style, and only the options that belong to the chosen one.
-    local styleLabel = Label(page, nil, "Show as")
-    styleLabel:SetPoint("TOPLEFT", 0, -57)
-    local groups, styleCards = {}, {}
-    for i, style in ipairs({ "circle", "dot" }) do
-        local card = Card(page, style == "circle" and "Circle" or "Dot", 78, 22, function()
-            db.nearStyle = style
-            ResyncAll() -- shows this style's options and re-stacks the sections
-            Relayout(true)
-            FN:Restyle()
-        end)
-        card:SetPoint("TOPLEFT", 62 + (i - 1) * 82, -52)
-        styleCards[style] = card
-        local group = CreateFrame("Frame", nil, page)
-        group:SetSize(SECTION_WIDTH, CIRCLE_HEIGHT)
-        sectionWidthFollowers[#sectionWidthFollowers + 1] = function(width) group:SetWidth(width - 2 * SECTION_INSET) end
-        group:SetPoint("TOPLEFT", 0, -GROUP_TOP)
-        groups[style] = group
-    end
-
-    local circle = groups.circle
-    Slider(circle, "Circle size", 8, 40, 1, "%d", Number("circleSize")):SetPoint("TOPLEFT", 0, 0)
-    Slider(circle, "Line width", 1, 8, 0.5, "%.1f", Number("circleLine")):SetPoint("TOPLEFT", 0, -44)
-    Slider(circle, "Border width", 0, 4, 0.5, "%.1f", Number("circleBorder")):SetPoint("TOPLEFT", 0, -88)
-    Swatch(circle, "Border color", function() return db.circleBorderColor end):SetPoint("TOPLEFT", 0, -132)
-
-    local dot = groups.dot
-    Slider(dot, "Dot size", 0, 12, 1, "%d", Number("dotSize")):SetPoint("TOPLEFT", 0, 0)
-    Slider(dot, "Border width", 0, 4, 0.5, "%.1f", Number("dotBorder")):SetPoint("TOPLEFT", 0, -44)
-    Swatch(dot, "Border color", function() return db.dotBorderColor end):SetPoint("TOPLEFT", 0, -88)
-
-    -- A line across the whole section, border to border, above the second border's options.
-    local separator = Stock() and Fill(dot, "ARTWORK", 0.20, 0.13, 0.07, 0.85) or Fill(dot, "ARTWORK", 1, 1, 1, 0.10)
-    separator:SetHeight(1)
-    separator:SetPoint("TOPLEFT", -SECTION_INSET, -120)
-    separator:SetPoint("TOPRIGHT", dot, "TOPRIGHT", SECTION_INSET, -120)
-
-    -- The dot's optional second border: a thin ring around it. Its own controls
-    -- show only while it is on.
-    local ring = CreateFrame("Frame", nil, dot)
-    ring:SetSize(SECTION_WIDTH, RING_HEIGHT)
-    sectionWidthFollowers[#sectionWidthFollowers + 1] = function(width) ring:SetWidth(width - 2 * SECTION_INSET) end
-    ring:SetPoint("TOPLEFT", 0, -162)
-    Slider(ring, "Ring size", 4, 30, 1, "%d", Number("dotRingSize")):SetPoint("TOPLEFT", 0, 0)
-    Slider(ring, "Ring width", 0.5, 4, 0.5, "%.1f", Number("dotRingWidth")):SetPoint("TOPLEFT", 0, -44)
-    Swatch(ring, "Ring color", function() return db.dotRingColor end):SetPoint("TOPLEFT", 0, -88)
-
-    -- Shows the chosen style's options and sizes the section to fit them.
-    local function ShowStyle()
-        for style, group in pairs(groups) do
-            group:SetShown(style == db.nearStyle)
-            styleCards[style]:SetSelected(style == db.nearStyle)
-        end
-        ring:SetShown(db.dotRing)
-        local groupHeight = CIRCLE_HEIGHT
-        if db.nearStyle == "dot" then
-            groupHeight = DOT_HEIGHT + (db.dotRing and RING_HEIGHT or 0)
-        end
-        nearby.height = GROUP_TOP + groupHeight
-    end
-    Check(dot, "Add a second ring/circle/border", Bool("dotRing", function()
-        ShowStyle()
+    -- Marker parts. A "Dot | Circle" switch picks which one is being set up. Each side shows a
+    -- sample of the whole marker on a piece of map, the shape's own settings beside it, and its
+    -- border's settings under a line, with the border's on/off box on the left.
+    local nearbyPage = page
+    local LayoutMarkers -- set below; the controls call it
+    local editingMark = "dot"
+    local innerWidth = SECTION_WIDTH - 2 * SECTION_INSET -- follows the section (wider when docked)
+    local ROW = 24     -- one settings row
+    local LABEL_W = 46 -- row labels, then the control
+    local VALUE_W = 34 -- a slider's value, at the right
+    -- "Profession" color means each node's own profession's: the sample cycles through them.
+    local previewColor = { 1, 1, 1 }
+    local function Small(fs) fs:SetFontObject(GameFontHighlightSmall) end
+    local function Refit()
+        if LayoutMarkers then LayoutMarkers() end
         Relayout(true)
         FN:Restyle()
-    end)):SetPoint("TOPLEFT", 0, -130)
-    syncers[#syncers + 1] = ShowStyle
+    end
+    local function Line()
+        local t = Stock() and Fill(nearbyPage, "ARTWORK", 0.20, 0.13, 0.07, 0.85) or Fill(nearbyPage, "ARTWORK", 1, 1, 1, 0.10)
+        t:SetHeight(1)
+        return t
+    end
+    -- 2.25, 2.5, 3: no trailing zeros.
+    local function Trim(v) return (("%.2f"):format(v):gsub("0+$", ""):gsub("%.$", "")) end
+
+    -- A button that opens a short menu under itself. `entries` are { value, menu text,
+    -- button text (optional), shorter button text for a narrow button (optional) }.
+    local function MenuButton(entries, get, set)
+        local b = Card(nearbyPage, "", 100, 22, nil)
+        local function Refresh()
+            local pick = entries[1]
+            for _, e in ipairs(entries) do if e[1] == get() then pick = e end end
+            local wide = b:GetWidth() >= 120
+            b.text:SetText((wide and pick[3]) or pick[4] or pick[3] or pick[2])
+        end
+        b.Refresh = Refresh
+        b:SetScript("OnClick", function(self)
+            -- A click while the menu is open (or just closed by this click) only closes it.
+            if self.menu and self.menu:IsShown() then
+                self.menu:Hide()
+                self.menu = nil
+                return
+            end
+            if self.menuClosedAt and GetTime() - self.menuClosedAt < 0.25 then
+                self.menuClosedAt = nil
+                return
+            end
+            if MenuUtil and MenuUtil.CreateContextMenu then
+                self.menu = MenuUtil.CreateContextMenu(self, function(_, root)
+                    if root.SetMinimumWidth then root:SetMinimumWidth(self:GetWidth()) end
+                    for _, e in ipairs(entries) do
+                        root:CreateRadio(e[2], function() return get() == e[1] end, function()
+                            set(e[1])
+                            ResyncAll()
+                            Refit()
+                        end)
+                    end
+                end)
+                local menu = self.menu
+                if menu and menu.ClearAllPoints then
+                    menu:ClearAllPoints()
+                    menu:SetPoint("TOPLEFT", self, "BOTTOMLEFT", 0, -2)
+                end
+                if menu and menu.HookScript then
+                    menu:HookScript("OnHide", function()
+                        if self.menu == menu then self.menu = nil; self.menuClosedAt = GetTime() end
+                    end)
+                end
+            else
+                -- No menu system: step through the choices.
+                local i = 1
+                for n, e in ipairs(entries) do if e[1] == get() then i = n end end
+                set(entries[i % #entries + 1][1])
+                ResyncAll()
+                Refit()
+            end
+        end)
+        syncers[#syncers + 1] = Refresh
+        return b
+    end
+
+    -- Rows. Each is { label = fontstring or nil, frame, kind } placed by LayoutMarkers.
+    local function SliderRow(text, minValue, maxValue, step, fmt, key)
+        local holder = Slider(nearbyPage, text, minValue, maxValue, step, fmt, Number(key))
+        holder:SetHeight(20)
+        Small(holder.label)
+        holder.label:ClearAllPoints(); holder.label:SetPoint("LEFT")
+        holder.value:ClearAllPoints(); holder.value:SetPoint("RIGHT")
+        holder.slider:ClearAllPoints()
+        holder.slider:SetPoint("LEFT", holder, "LEFT", LABEL_W, 0)
+        holder.slider:SetPoint("RIGHT", holder, "RIGHT", -VALUE_W, 0)
+        return { frame = holder, kind = "slider" }
+    end
+    local function LabelFor(text)
+        local fs = Label(nearbyPage, nil, text)
+        Small(fs)
+        return fs
+    end
+    -- On / off words: green while the part is on, red while it is off.
+    local ON_COLOR, OFF_COLOR = { 0.35, 0.85, 0.35 }, { 0.9, 0.32, 0.32 }
+    -- A part's on/off box, at the left of its block: "Dot", "Circle", "Border".
+    local function OnOffBox(title, key)
+        local box
+        local function Paint()
+            box.restColor = db[key] and ON_COLOR or OFF_COLOR
+            if not box:IsMouseOver() then box.Rest() end
+        end
+        box = Check(nearbyPage, title, function() return db[key] end, function(v)
+            db[key] = v and true or false
+            Paint()
+            Refit()
+        end)
+        syncers[#syncers + 1] = Paint
+        Paint()
+        return box
+    end
+    -- Color: "Linked to Profession" or "Custom", and a chip of the color in use beside it
+    -- (the profession's, or the custom one to click and change).
+    local function ColorRow(prefix)
+        local modeKey, colorKey = prefix .. "ColorMode", prefix .. "Color"
+        local button = MenuButton({
+            { "prof", "Profession color", "|cff9d9d9dLinked to|r Profession", "Profession" },
+            { "custom", "Custom color", "Custom" },
+        }, function() return db[modeKey] end, function(v) db[modeKey] = v end)
+        local swatch = Swatch(nearbyPage, "", function() return db[colorKey] end)
+        swatch:SetPoint("LEFT", button, "RIGHT", 8, 0)
+        local chip = CreateFrame("Frame", nil, nearbyPage)
+        chip:SetSize(26, 14)
+        chip:SetPoint("LEFT", button, "RIGHT", 8, 0)
+        -- The profession colors side by side: every one a linked part can take.
+        local stripes = {}
+        local stripeW = 26 / #FN.kinds
+        for i, kind in ipairs(FN.kinds) do
+            local t = Fill(chip, "ARTWORK", 1, 1, 1)
+            t:SetPoint("TOPLEFT", (i - 1) * stripeW, 0)
+            t:SetSize(stripeW, 14)
+            stripes[kind] = t
+        end
+        -- Edged like the dividing lines, darker than a clickable swatch's: this one is locked.
+        local chipEdge = Stock() and Fill(chip, "BACKGROUND", 0.16, 0.10, 0.05, 0.85) or Fill(chip, "BACKGROUND", 1, 1, 1, 0.08)
+        chipEdge:SetPoint("TOPLEFT", -1, 1)
+        chipEdge:SetPoint("BOTTOMRIGHT", 1, -1)
+        local row = { label = LabelFor("Color"), frame = button, kind = "menu", chipped = true }
+        function row.SyncColor(visible)
+            local custom = db[modeKey] == "custom"
+            swatch:SetShown(visible and custom)
+            chip:SetShown(visible and not custom)
+            for kind, t in pairs(stripes) do
+                local c = db.colors[kind]
+                t:SetColorTexture(c[1], c[2], c[3], 1)
+            end
+        end
+        return row
+    end
+
+    -- The two sides: the shape's on/off box and rows, then its border's.
+    local tabs = {
+        dot = {
+            mainBox = OnOffBox("Dot", "dotOn"),
+            main = {
+                ColorRow("dot"),
+                SliderRow("Size", 0, 12, 1, "%d", "dotSize"),
+            },
+            edgeKey = "dotEdgeOn",
+            edge = {
+                ColorRow("dotEdge"),
+                SliderRow("Width", 0.5, 4, 0.5, "%.1f", "dotEdgeWidth"),
+                SliderRow("Radius", 0.5, 15, 0.25, Trim, "dotEdgeRadius"),
+            },
+        },
+        circle = {
+            mainBox = OnOffBox("Circle", "circleOn"),
+            main = {
+                ColorRow("circle"),
+                SliderRow("Width", 0.5, 8, 0.5, "%.1f", "circleWidth"),
+                SliderRow("Radius", 2, 20, 0.25, Trim, "circleRadius"),
+            },
+            edgeKey = "circleEdgeOn",
+            edge = {
+                ColorRow("circleEdge"),
+                SliderRow("Width", 0.5, 4, 0.5, "%.1f", "circleEdgeWidth"),
+                SliderRow("Radius", 0.5, 24, 0.25, Trim, "circleEdgeRadius"),
+            },
+        },
+    }
+    for _, tab in pairs(tabs) do
+        tab.line = Line()
+        tab.edgeBox = OnOffBox("Border", tab.edgeKey)
+    end
+
+    -- The sample: a piece of map with the whole marker on it (dot, circle and both borders),
+    -- drawn larger, but never so large that part of it is cut off.
+    local PREVIEW_ZOOM = 2
+    local preview = CreateFrame("Frame", nil, nearbyPage)
+    local previewMap = preview:CreateTexture(nil, "BACKGROUND")
+    previewMap:SetTexture(FN.MEDIA .. "preview_map")
+    previewMap:SetAllPoints()
+    Outline(preview, previewMap, 0, 0, 0, 1)
+    local sample = CreateFrame("Frame", nil, preview)
+    sample:SetPoint("CENTER")
+    FN:MarkerTextures(sample)
+    -- Each profession's color holds a moment, then blends into the next.
+    local HOLD, BLEND = 1.2, 0.4
+    local cycleAt, cycleIndex = 0, 1
+    local function CycleColor()
+        local kinds = FN.kinds
+        local a = db.colors[kinds[cycleIndex]]
+        local b = db.colors[kinds[cycleIndex % #kinds + 1]]
+        local t = math.max(0, cycleAt - HOLD) / BLEND
+        for i = 1, 3 do previewColor[i] = a[i] + (b[i] - a[i]) * t end
+    end
+    preview:SetScript("OnUpdate", function(_, elapsed)
+        local wasBlending = cycleAt > HOLD
+        cycleAt = cycleAt + elapsed
+        if cycleAt >= HOLD + BLEND then
+            cycleAt = 0
+            cycleIndex = cycleIndex % #FN.kinds + 1
+        elseif not wasBlending and cycleAt <= HOLD then
+            return -- holding: nothing changes
+        end
+        FN:MarkerPreview()
+    end)
+    function FN:MarkerPreview()
+        CycleColor()
+        FN:DrawMarker(sample, previewColor)
+        local room = (preview:GetWidth() or 72) - 8
+        local whole = math.max(sample:GetWidth(), 1)
+        sample:SetScale(math.max(math.min(PREVIEW_ZOOM, room / whole), 0.5))
+    end
+
+    local topLine = Line()  -- above the range row
+    local headLine = Line() -- under the sample and the switch
+    -- What the marker is, beside the sample.
+    local about = Label(nearbyPage, "GameFontDisableSmall",
+        "Within range, node icons on the minimap fade, revealing this custom indicator. It keeps "
+        .. "the game's own node dot easy to see, and you can customize it below:")
+    about:SetJustifyH("LEFT")
+    about:SetJustifyV("TOP")
+    if about.SetWordWrap then about:SetWordWrap(true) end
+    local markToggle = PairToggle(nearbyPage, "Dot", "Circle", function()
+        editingMark = editingMark == "dot" and "circle" or "dot"
+        ResyncAll()
+        Refit()
+    end)
+    syncers[#syncers + 1] = function() markToggle:SetRight(editingMark == "circle") end
+
+    -- Places one block of rows in the right-hand column, starting at `y`; returns its height.
+    local function PlaceRows(rows, x, width, y, visible)
+        for i, row in ipairs(rows) do
+            local f, mid = row.frame, -(y + (i - 1) * ROW + ROW / 2)
+            f:SetShown(visible)
+            if row.label then row.label:SetShown(visible) end
+            if row.SyncColor then row.SyncColor(visible) end
+            if visible then
+                f:ClearAllPoints()
+                if row.label then
+                    row.label:ClearAllPoints()
+                    row.label:SetPoint("LEFT", nearbyPage, "TOPLEFT", x, mid)
+                end
+                if row.kind == "slider" then
+                    f:SetPoint("LEFT", nearbyPage, "TOPLEFT", x, mid)
+                    f:SetWidth(width)
+                else
+                    f:SetPoint("LEFT", nearbyPage, "TOPLEFT", x + LABEL_W, mid)
+                    f:SetWidth(width - LABEL_W - (row.chipped and 34 or 0))
+                    if f.Refresh then f.Refresh() end -- its wording can follow its width
+                end
+            end
+        end
+        return #rows * ROW
+    end
+
+    -- On top, a short description at the left and the sample at the right, then the
+    -- Dot | Circle switch centered under them. Under that the
+    -- shape's block and its border's block, each with its on/off box at the left and its
+    -- settings in a column at the right. Then the range, under a line.
+    local MARKERS_TOP = 4
+    local COL_X = 80      -- where the settings column starts
+    function LayoutMarkers()
+        local y = MARKERS_TOP
+
+        -- The sample is larger when the section has the room (docked).
+        local size = innerWidth >= 300 and 80 or 64
+        preview:SetSize(size, size)
+        FN:MarkerPreview() -- fits the sample to the new size
+        preview:ClearAllPoints()
+        preview:SetPoint("TOPRIGHT", nearbyPage, "TOPRIGHT", 0, -y)
+        about:ClearAllPoints()
+        about:SetPoint("TOPLEFT", 0, -(y + 2))
+        about:SetWidth(innerWidth - size - 12)
+        y = y + math.max(size, math.ceil(about:GetStringHeight()) + 2) + 8
+        markToggle:ClearAllPoints()
+        markToggle:SetPoint("TOP", nearbyPage, "TOP", 0, -y)
+        y = y + 28
+        headLine:ClearAllPoints()
+        headLine:SetPoint("TOPLEFT", nearbyPage, "TOPLEFT", 0, -(y + 4))
+        headLine:SetPoint("TOPRIGHT", nearbyPage, "TOPRIGHT", 0, -(y + 4))
+        y = y + 12
+
+        local width = innerWidth - COL_X
+        for key, t in pairs(tabs) do
+            local open = key == editingMark
+            t.line:SetShown(open)
+            t.mainBox:SetShown(open)
+            t.edgeBox:SetShown(open)
+            local mainHeight = PlaceRows(t.main, COL_X, width, y, open)
+            if open then
+                -- Each on/off box level with the middle of its own rows.
+                t.mainBox:ClearAllPoints()
+                t.mainBox:SetPoint("LEFT", nearbyPage, "TOPLEFT", 0, -(y + mainHeight / 2))
+                local top = y + mainHeight + 2
+                t.line:ClearAllPoints()
+                t.line:SetPoint("TOPLEFT", nearbyPage, "TOPLEFT", 0, -(top + 4))
+                t.line:SetPoint("TOPRIGHT", nearbyPage, "TOPRIGHT", 0, -(top + 4))
+                top = top + 12
+                local edgeHeight = PlaceRows(t.edge, COL_X, width, top, true)
+                t.edgeBox:ClearAllPoints()
+                t.edgeBox:SetPoint("LEFT", nearbyPage, "TOPLEFT", 0, -(top + edgeHeight / 2))
+                local bottom = top + edgeHeight + 6
+                topLine:ClearAllPoints()
+                topLine:SetPoint("TOPLEFT", nearbyPage, "TOPLEFT", -SECTION_INSET, -bottom)
+                topLine:SetPoint("TOPRIGHT", nearbyPage, "TOPRIGHT", SECTION_INSET, -bottom)
+                -- The game's own range, centered, then the range we switch at.
+                hint:ClearAllPoints()
+                hint:SetPoint("TOP", nearbyPage, "TOP", 0, -(bottom + 10))
+                -- The box itself centered under the note, "Range" before it and "yds" after.
+                range:ClearAllPoints()
+                range:SetPoint("TOP", nearbyPage, "TOP", 0, -(bottom + 28))
+                rangeLabel:ClearAllPoints()
+                rangeLabel:SetPoint("RIGHT", range, "LEFT", -12, 0)
+                nearby.height = bottom + 54
+            else
+                PlaceRows(t.edge, COL_X, width, y, false)
+            end
+        end
+    end
+    sectionWidthFollowers[#sectionWidthFollowers + 1] = function(width)
+        innerWidth = width - 2 * SECTION_INSET
+        if LayoutMarkers then LayoutMarkers() end
+    end
+    syncers[#syncers + 1] = function()
+        LayoutMarkers()
+        FN:MarkerPreview()
+    end
+    recordLabels[#recordLabels + 1] = function() FN:MarkerPreview(); LayoutMarkers() end -- profession colors changed
+    LayoutMarkers()
 
     -- Node lists ---------------------------------------------------------------
     _, page = Add(sectionsB, columnB, "lists", "Discovery", 68)
@@ -3536,6 +3890,22 @@ local function MapScale()
     return 1
 end
 
+-- Docked, the panel goes on the map window's layer, or its border frame's when that is higher
+-- (the border frame, the window's background and edges, can sit a layer above the map), well
+-- above both. Kept in step every frame, since clicking the map brings it to the front.
+local STRATA_ORDER = { BACKGROUND = 1, LOW = 2, MEDIUM = 3, HIGH = 4, DIALOG = 5,
+    FULLSCREEN = 6, FULLSCREEN_DIALOG = 7, TOOLTIP = 8 }
+local function DockPlace()
+    local map = WorldMapFrame
+    local top = map
+    local border = map.BorderFrame
+    if border and border.GetFrameStrata then
+        local a, b = STRATA_ORDER[map:GetFrameStrata()] or 0, STRATA_ORDER[border:GetFrameStrata()] or 0
+        if b > a or (b == a and border:GetFrameLevel() > map:GetFrameLevel()) then top = border end
+    end
+    return top:GetFrameStrata(), math.min(top:GetFrameLevel() + 1000, 9000)
+end
+
 local function ApplyLayout()
     local docked = ShouldDock()
     frame.docked = docked
@@ -3545,6 +3915,18 @@ local function ApplyLayout()
     frame.narrow = narrow
     -- Each mode has its own scale; docked, it also follows the map window's.
     frame:SetScale(docked and (FN.db.dockScale * MapScale()) or FN.db.scale)
+    -- Layering. Docked, the panel is part of the map window: it takes the map's own layer,
+    -- just above the map's contents, so whatever shows over the map (popups, other windows)
+    -- shows over the panel too, and nothing slips in between the panel's own pieces.
+    -- Floating, it is a dialog, above the map; over a maximized map it has to go higher.
+    if docked then
+        local strata, level = DockPlace()
+        frame:SetFrameStrata(strata)
+        frame:SetFrameLevel(level)
+    else
+        local overMap = WorldMapFrame and WorldMapFrame:IsShown() and MapIsFullScreen()
+        frame:SetFrameStrata(overMap and "FULLSCREEN_DIALOG" or "DIALOG")
+    end
     -- Esc closes the floating window. The side panel instead follows the map, so
     -- that closing the map with Esc does not count as closing the panel.
     SetEscCloses(not docked)
@@ -3738,6 +4120,7 @@ local function CreateOptions()
     frame:SetSize(WIDTH, HEIGHT)
     frame:SetScale(FN.db.scale)
     frame:SetFrameStrata("FULLSCREEN_DIALOG") -- stays above a maximized world map
+    frame:SetToplevel(true) -- a click brings it in front of other windows on its layer
     frame:SetPoint("CENTER")
     frame:SetMovable(true)
     frame:EnableMouse(true)
@@ -3941,6 +4324,12 @@ function FN:SetupMapPanel()
     -- which no size event reports: while the map is open, refit when its scale changes.
     local lastScale = MapScale()
     map:HookScript("OnUpdate", function()
+        -- The map came to the front (it was clicked): stay above it.
+        if frame and frame:IsShown() and frame.docked then
+            local strata, level = DockPlace()
+            if frame:GetFrameStrata() ~= strata then frame:SetFrameStrata(strata) end
+            if frame:GetFrameLevel() ~= level then frame:SetFrameLevel(level) end
+        end
         local now = MapScale()
         if math.abs(now - lastScale) > 0.0001 then
             lastScale = now
@@ -3975,10 +4364,6 @@ end
 
 function FN:RefreshOptions()
     if frame and frame:IsShown() then SyncAll() end
-end
-
-function FN:OptionsShown()
-    return frame ~= nil and frame:IsShown()
 end
 
 -- The window's own close button.
