@@ -2,8 +2,14 @@
 # Tools (the merge tool) is for the author, not for players; media and README are for GitHub.
 package-as: ForeverNodes
 
+# The release notes shown on CurseForge and GitHub: CHANGELOG.md, written by hand for each release.
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
 ignore:
   - Tools
   - .github
   - media
   - README.md
+  - CHANGELOG.md
