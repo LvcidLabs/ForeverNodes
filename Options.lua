@@ -3830,6 +3830,13 @@ end
 
 local wantPanel = false -- opened from the world map button (rather than /fn or the Esc menu)
 local internal = false  -- the quest log is being opened or closed by us, not by the player
+local peeking = false   -- the quest log is up where the node panel usually is (L, or a quest was
+                        -- opened); the panel is back the next time the map opens
+
+-- The game's "quest log open" setting: the map's quest log arrow sets it, and M opens the map
+-- with the quest log or without by it. It is the player's: the panel never changes it.
+local GetCV = (C_CVar and C_CVar.GetCVar) or GetCVar
+local SetCV = (C_CVar and C_CVar.SetCVar) or SetCVar
 
 -- Kept in the saved settings, so it survives closing the map and reloading:
 --   open         the node panel is the map's side panel
@@ -3872,6 +3879,8 @@ local function SetQuestLog(show)
     if not map.QuestLog or QuestLogShown() == show then return end
     if InCombatLockdown() and map:IsProtected() then return end -- the map cannot be resized in combat
     internal = true
+    -- The game's own toggle also saves the quest log setting; put it back as it was.
+    local keep = GetCV and GetCV("questLogOpen")
     if map.HandleUserActionToggleSidePanel then
         map:HandleUserActionToggleSidePanel()
     elseif show and QuestMapFrame_Open then
@@ -3879,6 +3888,7 @@ local function SetQuestLog(show)
     elseif not show and QuestMapFrame_Close then
         QuestMapFrame_Close()
     end
+    if keep ~= nil and SetCV and GetCV("questLogOpen") ~= keep then SetCV("questLogOpen", keep) end
     internal = false
 end
 
@@ -4584,6 +4594,7 @@ end
 local function OpenPanel()
     if not frame then CreateOptions() end
     wantPanel = true
+    peeking = false
     State().open = true
     MeasureQuestLayout() -- while the quest log is still up, note the room it takes
     -- Take the quest log's place: open it (if it is not already) and hide it under the panel.
@@ -4597,19 +4608,19 @@ local function OpenPanel()
     frame:Raise()
 end
 
--- why: "button" (the node button), "x" (the panel's close button) or "quest" (the player
--- opened the quest log, or a quest).
+-- why: "button" (the node button), "x" (the panel's close button) or "peek" (L, the quest log
+-- arrow, or a quest was opened: the quest log is shown over the panel for now, and the panel
+-- comes back with the arrow or the next map opening).
 local function ClosePanel(why)
-    -- One side panel at a time, and closing one leaves none open: neither panel
-    -- brings the other back.
     local state = State()
-    state.open = false
+    if why ~= "peek" then state.open = false end
+    peeking = (why == "peek" and state.open) and true or false
     state.questBefore, state.nodesBefore = nil, nil
     frame:Hide()
     if covering then
         Cover(false)
-        -- The player asked for the quest log: it stays, now seen. Otherwise the side closes.
-        SetQuestLog(why == "quest")
+        -- The quest log was asked for: it stays, now seen. Otherwise the side closes.
+        SetQuestLog(why == "peek")
     end
 end
 
@@ -4623,7 +4634,7 @@ local function RestorePanel()
         return
     end
     local state = State()
-    if not state.open then
+    if not state.open or peeking then
         -- Left hidden when the map was last closed but not wanted now: let it be seen.
         if covering and not (frame and frame:IsShown()) then Cover(false) end
         return
@@ -4655,22 +4666,38 @@ function FN:SetupMapPanel()
     local map = WorldMapFrame
     if not map then return end
 
-    local reopenPending = false -- the quest log was just closed and the node panel is due back
-
-    -- The map's quest log button while the panel has the quest log's place: the player wants
-    -- the quest log. The game has just closed it (it was open under the panel); open it again,
-    -- seen, and close the panel, all before the next frame is drawn. (Hooked before the
-    -- layout hooks below, so they see the result.)
+    -- The map's quest log arrow while the node panel is in use: it only moves the quest log in
+    -- over the panel and out again (the panel stays on; only the node button turns it off), and
+    -- leaves the game's quest log setting as it was. All before the next frame is drawn.
+    -- (Hooked before the layout hooks below, so they see the result.)
+    local arrowSetting -- the quest log setting just before the arrow was clicked
     if type(map.HandleUserActionToggleSidePanel) == "function" then
         hooksecurefunc(map, "HandleUserActionToggleSidePanel", function()
-            if internal or not covering or MapIsFullScreen() or QuestLogShown() then return end
-            if not (frame and frame:IsShown() and frame.docked) then return end
-            ClosePanel("quest")
+            local keep = arrowSetting
+            arrowSetting = nil
+            if internal or MapIsFullScreen() or not FN.db.dock or not State().open then return end
+            if covering and frame and frame:IsShown() and frame.docked then
+                -- The panel was showing (the quest log under it, which the game just closed):
+                -- the quest log comes in over the panel.
+                ClosePanel("peek")
+            elseif not QuestLogShown() then
+                OpenPanel() -- the quest log went out: the panel is back
+            else
+                peeking = true -- the quest log came in where the panel usually is
+            end
+            if keep ~= nil and SetCV and GetCV("questLogOpen") ~= keep then SetCV("questLogOpen", keep) end
         end)
     end
     -- Its arrow: "closed" while the panel covers the quest log, since to the player the quest
     -- log is not open.
     local toggle = map.SidePanelToggle
+    if toggle then
+        for _, button in ipairs({ toggle.OpenButton, toggle.CloseButton }) do
+            if button and button.HookScript then
+                button:HookScript("PreClick", function() arrowSetting = GetCV and GetCV("questLogOpen") end)
+            end
+        end
+    end
     if toggle and type(toggle.Refresh) == "function" then
         hooksecurefunc(toggle, "Refresh", function(self)
             if not covering then return end
@@ -4685,11 +4712,7 @@ function FN:SetupMapPanel()
     local function Settle()
         if settling or internal then return end
         settling = true
-        if reopenPending then
-            if map:IsShown() and not QuestLogShown() and not MapIsFullScreen() then
-                OpenPanel()
-            end
-        elseif frame and frame:IsShown() and frame.docked and ShouldDock() then
+        if frame and frame:IsShown() and frame.docked and ShouldDock() then
             ApplyLayout()
         end
         settling = false
@@ -4707,10 +4730,6 @@ function FN:SetupMapPanel()
         queued = true
         C_Timer.After(0, function()
             queued = false
-            if reopenPending then
-                Settle()
-                reopenPending = false
-            end
             MeasureQuestLayout()
             mergeCounting = true
             FN:UpdateDock()
@@ -4745,25 +4764,79 @@ function FN:SetupMapPanel()
 
     local log = map.QuestLog
     if not log then return end
-    -- The player opened the quest log: it takes the side over from the node panel.
+    -- The quest log was opened some other way: it comes in over the node panel.
     log:HookScript("OnShow", function()
         if internal then return end
-        reopenPending = false
-        if frame and frame:IsShown() and frame.docked then ClosePanel("quest") end
+        if frame and frame:IsShown() and frame.docked then ClosePanel("peek") end
         C_Timer.After(0, MeasureQuestLayout) -- once the window has laid itself out
-    end)
-    -- The player closed the quest log: bring the node panel back if it had been
-    -- replaced. The map is still mid-resize here, so Settle does it once that is done.
-    log:HookScript("OnHide", function()
-        reopenPending = false -- closing the quest log leaves the side empty
     end)
     -- A quest was opened (from the tracker, a map pin, ...): show the quest log.
     for _, name in ipairs({ "QuestMapFrame_ShowQuestDetails", "QuestMapFrame_OpenToQuestDetails" }) do
         if type(_G[name]) == "function" then
             hooksecurefunc(name, function()
-                if covering and frame and frame:IsShown() and frame.docked then ClosePanel("quest") end
+                if covering and frame and frame:IsShown() and frame.docked then ClosePanel("peek") end
             end)
         end
+    end
+
+    -- The M and L keys, while the node panel is in use (otherwise the game's own way is left
+    -- alone). M opens the map as it was left (with the panel) and closes it, whatever is at the
+    -- side. L is the game's as ever: the quest log (in the panel's place), and again closes the map.
+    local settled = false -- the map has been open for at least a frame (not opened just now)
+    map:HookScript("OnUpdate", function() settled = true end)
+    map:HookScript("OnHide", function()
+        settled = false
+        peeking = false
+    end)
+    local busy = false
+    local function CanAct() return not (InCombatLockdown() and map:IsProtected()) end
+    local function DockedShown() return frame and frame:IsShown() and frame.docked end
+    local function SettingOn() return GetCV and GetCV("questLogOpen") == "1" end
+
+    if type(map.HandleUserActionToggleSelf) == "function" then
+        hooksecurefunc(map, "HandleUserActionToggleSelf", function()
+            if busy or not map:IsShown() or MapIsFullScreen() or not FN.db.dock then return end
+            if not settled then
+                RestorePanel() -- just opened: the panel straight away if it is the usual view
+            elseif covering then
+                -- The panel was up with the setting off: the game only hid the quest log under
+                -- it. M closes the map.
+                if not log:IsShown() and not SettingOn() and CanAct() then HideUIPanel(map) end
+            elseif (peeking or State().open) and CanAct() then
+                -- The quest log was up in the panel's place and the setting is off: the game only
+                -- hid the quest log. M closes the map (the panel is back the next time it opens).
+                HideUIPanel(map)
+            elseif not log:IsShown() and not DockedShown() and SettingOn() and CanAct() then
+                -- Nothing at the side with the setting on (the panel was closed): the game leaves
+                -- the map as it is. M closes it.
+                HideUIPanel(map)
+            end
+        end)
+    end
+
+    if type(map.HandleUserActionToggleQuestLog) == "function" then
+        hooksecurefunc(map, "HandleUserActionToggleQuestLog", function()
+            if busy then return end
+            if not map:IsShown() then
+                -- The panel was up (the quest log under it), so the game closed the map. L asks
+                -- for the quest log: the map opens again with it, in this same frame.
+                if covering and CanAct() and type(map.HandleUserActionOpenQuestLog) == "function" then
+                    busy = true
+                    map:HandleUserActionOpenQuestLog()
+                    busy = false
+                else
+                    return
+                end
+            end
+            if not (map:IsShown() and log:IsShown()) then return end
+            -- The quest log is up, in the panel's place if the panel is in use.
+            if DockedShown() then
+                ClosePanel("peek")
+            else
+                if covering then Cover(false) end
+                peeking = State().open and true or false
+            end
+        end)
     end
 end
 
