@@ -49,8 +49,8 @@ function FN.ShowTipLeftOf(owner, text, sub, subWidest, subAtlas)
         tip.subIcon = tip:CreateTexture(nil, "OVERLAY")
         tip.subIcon:SetSize(SUB_ICON, SUB_ICON)
     end
-    tip.text:SetText(text)
-    tip.sub:SetText(sub or "")
+    FN:SetText(tip.text, text)
+    FN:SetText(tip.sub, sub or "")
     tip.sub:SetShown(sub ~= nil)
     local hasIcon = sub ~= nil and subAtlas ~= nil
     if hasIcon then tip.subIcon:SetAtlas(subAtlas, false) end
@@ -69,9 +69,9 @@ function FN.ShowTipLeftOf(owner, text, sub, subWidest, subAtlas)
         local iconSpace = hasIcon and SUB_ICON + 2 or 0
         local subWidth = Width(tip.sub)
         if subWidest then
-            tip.sub:SetText(subWidest)
+            FN:SetText(tip.sub, subWidest)
             subWidth = math.max(subWidth, Width(tip.sub))
-            tip.sub:SetText(sub)
+            FN:SetText(tip.sub, sub)
         end
         width = math.max(width, iconSpace + subWidth)
         tip.text:SetPoint("TOPLEFT", 7, -6) -- the text sits high in its line, so a little more room on top
@@ -457,7 +457,7 @@ local function SetupWorldMapButton()
         note:EnableMouse(true)
         noteHead = note:CreateFontString(nil, "OVERLAY", "GameFontHighlightLeft")
         noteHead:SetPoint("TOPLEFT", 15, -15)
-        noteHead:SetText("|cffffd100[Forever Nodes]|r |cff707070by Lvcid|r")
+        FN:SetText(noteHead, "|cffffd100[Forever Nodes]|r |cff707070by Lvcid|r")
         noteText = note:CreateFontString(nil, "OVERLAY", "GameFontHighlightLeft")
         noteText:SetWidth(196)
         noteText:SetJustifyV("TOP")
@@ -466,7 +466,7 @@ local function SetupWorldMapButton()
         noteCount:SetPoint("BOTTOMLEFT", 16, 18)
         noteLeft = NoteButton("BOTTOMLEFT")
         noteLeft:SetWidth(104)
-        noteLeft:SetText("Quick Tutorial")
+        FN:SetText(noteLeft, "Quick Tutorial")
         noteLeft:SetScript("OnClick", function() GoToStep(1) end)
         noteRight = NoteButton("BOTTOMRIGHT")
         noteRight:SetWidth(84)
@@ -589,12 +589,12 @@ local function SetupWorldMapButton()
         noteText:ClearAllPoints()
         noteText:SetPoint("TOPLEFT", 15, opening and -37 or -15)
         noteText:SetWidth(600)
-        noteText:SetText(opening and OPENING_TEXT or STEP_TEXT[tourStep])
+        FN:SetText(noteText, opening and OPENING_TEXT or STEP_TEXT[tourStep])
         -- Wide enough to keep a short line on one row; a long sentence wraps.
         local noteWidth = math.min(320, math.max(226, math.ceil(noteText:GetStringWidth()) + 32))
         note:SetWidth(noteWidth)
         noteText:SetWidth(noteWidth - 30)
-        noteCount:SetText(opening and "" or (tourStep .. "/" .. TOUR_STEPS))
+        FN:SetText(noteCount, opening and "" or (tourStep .. "/" .. TOUR_STEPS))
         local guide = opening and FN:TourAvailable()
         noteLeft:SetShown(guide)
         -- The opening note's buttons are centered, one to a row; the steps' sits at the right.
@@ -609,7 +609,7 @@ local function SetupWorldMapButton()
             noteRight:SetWidth(84)
             noteRight:SetPoint("BOTTOMRIGHT", -12, 12)
         end
-        noteRight:SetText(opening and "Okay" or (tourStep < TOUR_STEPS and "Next" or "Done"))
+        FN:SetText(noteRight, opening and "Okay" or (tourStep < TOUR_STEPS and "Next" or "Done"))
         note:SetHeight((opening and 37 or 15) + noteText:GetStringHeight() + 14 + (guide and 26 or 0) + 22 + 12)
     end
     GoToStep = function(step)
@@ -753,9 +753,9 @@ local function SetupMinimapButton()
     local LMB = MouseIcon({ "NPE_LeftClick", "newplayertutorial-icon-mouse-leftbutton" }, "Left-click:")
     local RMB = MouseIcon({ "NPE_RightClick", "newplayertutorial-icon-mouse-rightbutton" }, "Right-click:")
     local function FillTooltip(tooltip)
-        tooltip:AddLine(TITLE)
-        tooltip:AddLine(LMB .. " Open", 1, 1, 1)
-        tooltip:AddLine(RMB .. " Options", 1, 1, 1)
+        tooltip:AddLine(FN:Text(TITLE))
+        tooltip:AddLine(FN:Text(LMB .. " Open"), 1, 1, 1)
+        tooltip:AddLine(FN:Text(RMB .. " Options"), 1, 1, 1)
     end
 
     -- Right click: a short menu of the most used settings.
@@ -768,21 +768,21 @@ local function SetupMinimapButton()
         if dbicon.tooltip then dbicon.tooltip:Hide() end
         if GameTooltip:IsOwned(owner) then GameTooltip:Hide() end
         MenuUtil.CreateContextMenu(owner, function(_, root)
-            root:CreateTitle("|cffffd100Forever Nodes|r")
+            root:CreateTitle(FN:Text("|cffffd100Forever Nodes|r"))
             root:CreateDivider()
 
-            local icons = root:CreateButton("Icons")
+            local icons = root:CreateButton(FN:Text("Icons"))
             for _, entry in ipairs({ { "worldmap", "World map" }, { "minimap", "Minimap" } }) do
-                icons:CreateCheckbox(entry[2], function() return db[entry[1]] end, function()
+                icons:CreateCheckbox(FN:Text(entry[2]), function() return db[entry[1]] end, function()
                     db[entry[1]] = not db[entry[1]]
                     FN:Refresh()
                     if FN.RefreshOptions then FN:RefreshOptions() end
                 end)
             end
 
-            local tips = root:CreateButton("Tooltips")
+            local tips = root:CreateButton(FN:Text("Tooltips"))
             for _, entry in ipairs({ { "world", "World map" }, { "minimap", "Minimap" }, { "overworld", "Overworld" } }) do
-                tips:CreateCheckbox(entry[2], function() return FN:TipCfg(entry[1]).on end, function()
+                tips:CreateCheckbox(FN:Text(entry[2]), function() return FN:TipCfg(entry[1]).on end, function()
                     local cfg = FN:TipCfg(entry[1])
                     cfg.on = not cfg.on
                     if entry[1] == "world" then FN:Refresh() end
@@ -790,16 +790,16 @@ local function SetupMinimapButton()
                 end)
             end
 
-            local panel = root:CreateButton("Panel")
+            local panel = root:CreateButton(FN:Text("Panel"))
             for _, entry in ipairs({ { true, "Docked to world map" }, { false, "Floating panel" } }) do
-                panel:CreateRadio(entry[2], function() return (db.dock and true or false) == entry[1] end, function()
+                panel:CreateRadio(FN:Text(entry[2]), function() return (db.dock and true or false) == entry[1] end, function()
                     db.dock = entry[1]
                     if FN.DockSettingChanged then FN:DockSettingChanged() end
                     if FN.RefreshOptions then FN:RefreshOptions() end
                 end)
             end
 
-            root:CreateButton("Settings", function() FN:OpenToSettings() end)
+            root:CreateButton(FN:Text("Settings"), function() FN:OpenToSettings() end)
         end)
     end
     broker = ldb:NewDataObject(ADDON, {
@@ -859,14 +859,14 @@ local function SetupSettingsPage()
     local page = CreateFrame("Frame")
     local title = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightHuge")
     title:SetPoint("TOPLEFT", 7, -22)
-    title:SetText(TITLE)
+    FN:SetText(title, TITLE)
     -- Version and author beside the title, smaller and grey, on the same baseline.
     local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version")
     -- A step smaller than body text, sitting on the title's baseline, with the version a
     -- shade dimmer than the author so the two read as separate bits.
     local byline = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     byline:SetPoint("BOTTOMLEFT", title, "BOTTOMRIGHT", 10, 2)
-    byline:SetText((version and ("|cff6f6f6fv" .. version .. "|r \226\128\148 ") or "") .. "by Lvcid") -- an em dash between
+    FN:SetText(byline, (version and ("|cff6f6f6fv" .. version .. "|r \226\128\148 ") or "") .. "by Lvcid") -- an em dash between
     local divider = page:CreateTexture(nil, "ARTWORK")
     if not pcall(divider.SetAtlas, divider, "Options_HorizontalDivider", true) or not divider:GetAtlas() then
         divider:SetColorTexture(1, 1, 1, 0.12) -- the plain line where the atlas is missing
@@ -879,11 +879,11 @@ local function SetupSettingsPage()
     local LEFT, TOP = 27, -72
     local intro = page:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     intro:SetPoint("TOPLEFT", LEFT, TOP - 10) -- a little below the frame's top, so the block sits centered beside it
-    intro:SetText("All settings are in Forever Nodes' own window.")
+    FN:SetText(intro, "All settings are in Forever Nodes' own window.")
     local open = CreateFrame("Button", nil, page, "UIPanelButtonTemplate")
     open:SetSize(180, 26)
     open:SetPoint("TOP", intro, "BOTTOM", 0, -34) -- centered under the line above, with room above it
-    open:SetText("Open Forever Nodes")
+    FN:SetText(open, "Open Forever Nodes")
     open:SetScript("OnClick", function()
         if SettingsPanel and SettingsPanel:IsShown() then HideUIPanel(SettingsPanel) end
         FN:OpenFromCommand()
@@ -892,19 +892,19 @@ local function SetupSettingsPage()
     local openSettings = CreateFrame("Button", nil, page, "UIPanelButtonTemplate")
     openSettings:SetSize(180, 26)
     openSettings:SetPoint("TOPLEFT", open, "BOTTOMLEFT", 0, -6)
-    openSettings:SetText("Show Settings")
+    FN:SetText(openSettings, "Show Settings")
     openSettings:SetScript("OnClick", function()
         if SettingsPanel and SettingsPanel:IsShown() then HideUIPanel(SettingsPanel) end
         FN:OpenToSettings()
     end)
     local also = page:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     also:SetPoint("TOPLEFT", intro, "BOTTOMLEFT", 22, -125) -- indented a little, clear of the buttons
-    also:SetText("It also opens from:")
+    FN:SetText(also, "It also opens from:")
     local ways = page:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     ways:SetPoint("TOPLEFT", also, "BOTTOMLEFT", 8, -8)
     ways:SetJustifyH("LEFT")
     ways:SetSpacing(5)
-    ways:SetText("-  the world map button (pictured)\n-  the minimap button\n-  typing |cffffd100/fn|r")
+    FN:SetText(ways, "-  the world map button (pictured)\n-  the minimap button\n-  typing |cffffd100/fn|r")
 
     -- One picture per look (EllesmereUI or stock), with everything in it: the map's
     -- bottom-right corner with a soft spotlight on the button, a caption, what its
@@ -965,7 +965,7 @@ local function SetupSettingsPage()
     -- Options, under their own heading as on the game's pages.
     local heading = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
     heading:SetPoint("TOPLEFT", page, "TOPLEFT", 20, TOP - 262) -- under the framed picture
-    heading:SetText("Miscellaneous")
+    FN:SetText(heading, "Miscellaneous")
 
     local function Tick(text, anchor, y)
         local box = CreateFrame("CheckButton", nil, page, "UICheckButtonTemplate")
@@ -973,7 +973,7 @@ local function SetupSettingsPage()
         local label = box.Text or box.text
         if label then
             label:SetFontObject("GameFontNormal") -- the size the game's own pages use for options
-            label:SetText(text)
+            FN:SetText(label, text)
         end
         return box
     end
@@ -1000,7 +1000,7 @@ local function SetupSettingsPage()
     floatNote:SetPoint("TOPLEFT", float, "BOTTOMLEFT", 30, 2)
     floatNote:SetJustifyH("LEFT")
     floatNote:SetSpacing(3)
-    floatNote:SetText("Recommended: |cffff4040Disabled|r\n"
+    FN:SetText(floatNote, "Recommended: |cffff4040Disabled|r\n"
         .. "Only enable if another addon stops the docked window from showing correctly.")
 
     -- Plain: the list turns the selected entry white, which it cannot do to colored letters.

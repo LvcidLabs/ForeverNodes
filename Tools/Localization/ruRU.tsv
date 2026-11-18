@@ -1,0 +1,234 @@
+# English display key<TAB>Russian; canonical data and saved keys stay English.
+Herbalism	Травничество
+Mining	Горное дело
+Fishing	Рыбная ловля
+Herbs	Травы
+Ore	Руда
+Fish pools	Рыбные косяки
+Nodes	Ресурсы
+Settings	Настройки
+Options	Настройки
+Open	Открыть
+Clear Selection	Снять выбор
+Select All	Выбрать всё
+View trainers	Показать учителей
+Hide trainers	Скрыть учителей
+Lvl	Ур.
+A-Z	А–Я
+Name	Имя
+Level	Уровень
+Price	Цена
+Distance	Расстояние
+Dist	Расст.
+Zone	Местность
+Sort	Сортировка
+SORT	СОРТИРОВКА
+Apprentice	Ученик
+Journeyman	Подмастерье
+Expert	Умелец
+Artisan	Искусник
+Next rank:	Следующий ранг:
+Next:	Далее:
+Learn:	Изучить:
+Requires level	Нужен уровень
+Requires	Требуется
+Requirements	Требования
+none	нет
+Your gold	Ваши деньги
+Not learned	Не изучено
+Fully trained. Nothing left to learn.	Высший ранг изучен. Дальнейшее обучение не требуется.
+Click again to hide	Повторный клик — скрыть
+Click the bar to hide the trainers	Нажмите на полосу, чтобы скрыть учителей
+Click the bar for all	Нажмите на полосу — все учителя:
+Closest & cheapest:	Ближайший и самый дешёвый:
+Closest:	Ближайший:
+Cheapest:	Самый дешёвый:
+trainers	учителей
+trainer	учитель
+Pin to map	Отметить на карте
+Left-click:	ЛКМ:
+Right-click:	ПКМ:
+RMB:	ПКМ:
+Maps & Icons	Карты и значки
+Minimap	Миникарта
+World map	Карта мира
+Overworld	Игровой мир
+Show on minimap	Показывать на миникарте
+Show on world map	Показывать на карте мира
+Circular icon zoom	Приближение значка
+Circular Icons (crop to look cleaner)	Круглые значки
+Icon size	Размер значков
+Advanced Minimap Settings	Дополнительно: миникарта
+Draw range	Дальность отображения
+Shape	Форма
+Auto	Авто
+Round	Круг
+Square	Квадрат
+Detected:	Определено:
+round	круг
+square	квадрат
+Professions	Профессии
+Used on the maps, the nearby marker and the panel.	Цвета карты, ближних маркеров и панели.
+Only while tracking	Только при включённом поиске
+Only while pole equipped	Только с удочкой в руках
+Allow access to unlearned professions	Показывать неизученные профессии
+Allow tracking unlearned professions	Показывать неизученные профессии
+Appearance & Behavior	Вид и поведение
+Separate nodes by profession tier	Разделять ресурсы по рангам
+Show nodes beyond my profession tier	Показывать ресурсы выше моего ранга
+Lvl sort	По уровню
+A-Z sort	По алфавиту
+Skill 300	Навык 300
+Mute	Приглушить
+difficulty coloring	цвета сложности
+doesn't affect tooltips	не влияет на подсказки
+Tooltips	Подсказки
+World map tooltips	Подсказки на карте мира
+Minimap tooltips	Подсказки на миникарте
+Overworld tooltips	Подсказки в игровом мире
+Tooltip Customization	Оформление подсказок
+EXPERIMENTAL	ЭКСПЕРИМЕНТ
+Attach to	Привязка
+Placement	Положение
+Before	До
+After	После
+Style	Стиль
+Color	Цвет
+The node's name	Название ресурса
+The skill's name	Название профессии
+The name	Название
+The level	Уровень
+The whole line	Вся строка
+Level and brackets	Уровень и скобки
+Level and separator	Уровень и разделитель
+No color	Без цвета
+Simple:  150	Обычный:  150
+Rounded:  (150)	Круглые:  (150)
+Squared:  [150]	Квадратные:  [150]
+Separator:  150 | Name	Разделитель:  150 | Название
+Separator:  Name | 150	Разделитель:  Название | 150
+Text size	Размер текста
+PREVIEW	ПРИМЕР
+Nearby nodes	Ресурсы вблизи
+Range	Дальность
+Nodes officially appear at	Игровые точки появляются с
+yds	ярдов
+yd	ярд.
+k yd	тыс. ярд.
+Within range, node icons on the minimap fade, revealing this custom indicator. It keeps	Вблизи значки ресурсов на миникарте заменяются этим маркером. Он сохраняет
+the game's own node dot easy to see, and you can customize it below:	видимость игровой точки. Ниже можно изменить его вид:
+Dot	Точка
+Circle	Кольцо
+Border	Обводка
+Radius	Радиус
+Width	Толщина
+Size	Размер
+Custom	Свой
+Custom color	Свой цвет
+Profession	Профессия
+Profession color	Цвет профессии
+Linked to	Связано с
+Copy	Копировать
+Paste	Вставить
+Copy color	Копировать цвет
+Paste color	Вставить цвет
+Remembers this color, to paste into another color in Forever Nodes.	Запоминает цвет, чтобы применить его к другому элементу Forever Nodes.
+Uses the color last copied with Copy.	Применяет последний скопированный цвет.
+For the system clipboard, click the hex box and use Ctrl+C / Ctrl+V.	Для системного буфера выделите код цвета и используйте Ctrl+C / Ctrl+V.
+Discovery	Новые точки
+Record new	Записывать новые
+herb	травы
+mining	руды
+fishing	рыбалки
+locations	точки
+spots	места
+Window	Окно
+Dock to the world map (map button)	Прикрепить к карте мира
+Uncheck for floating panel	Снимите для отдельного окна
+Theme	Тема
+Brown	Коричневая
+Dark	Тёмная
+Show	Показать
+Refresh	Обновить
+Gz on %s! You've hit the %s cap. Open the Forever Nodes panel %s	Поздравляем: %s! Достигнут предел ранга «%s». Откройте Forever Nodes, %s
+Gz on %s! You've mastered it, nothing left to train.	Поздравляем: %s! Высший ранг освоен, дальнейшее обучение не требуется.
+Don't forget to train your next %s rank%s%s! See the Forever Nodes panel for trainers and cost.	Не забудьте изучить следующий ранг: %s%s%s! Учителя и стоимость указаны в Forever Nodes.
+You're now level %d: you can learn Expert %s! See the Forever Nodes panel for where to get the book.	Вы достигли уровня %d: можно изучить ранг «Умелец» — %s! Место покупки книги указано в Forever Nodes.
+You're now level %d: you can start Nat Pagle's Artisan %s quest! See the Forever Nodes panel for where to find him.	Вы достигли уровня %d: доступно задание Ната Пэгла на ранг «Искусник» — %s! Найдите его через Forever Nodes.
+You're now level %d: you can train %s %s! See the Forever Nodes panel for trainers and cost.	Вы достигли уровня %d: можно изучить «%s» — %s! Учителя и стоимость указаны в Forever Nodes.
+You'll need level %d to learn it.	Для изучения нужен уровень %d.
+to see where to get the Expert Fishing book.	чтобы узнать, где купить книгу для ранга «Умелец» рыбной ловли.
+to see where to start Nat Pagle's Artisan quest.	чтобы найти задание Ната Пэгла на ранг «Искусник».
+to see where you can train %s.	чтобы найти учителя для ранга «%s».
+Difficulty colors in your list are now muted.	Цвета сложности в списке теперь приглушены.
+recorded a new spot for %s.	Записана новая точка: %s.
+new %s type recorded: %s. It is in the %s list, unticked.	Записан новый тип (%s): %s. Он добавлен в список «%s» без отметки.
+pool	косяк
+ore	руда
+Record new %s locations	Записывать новые точки: %s
+Record new %s spots	Записывать новые места: %s
+Scale	Масштаб
+Docked Panel	Панель на карте
+Floating Panel	Отдельное окно
+Reset scaling	Сбросить масштаб
+Addon Buttons	Кнопки аддона
+Show the minimap button	Кнопка у миникарты
+Show the world map button	Кнопка на карте мира
+Lock the world map button	Закрепить кнопку на карте
+Reset position	Сбросить положение
+Interface language	Язык интерфейса
+Russian	Русский
+English	English
+Node names always follow the client language.	Названия ресурсов — всегда на языке клиента.
+Undo	Отменить
+Puts back the ticks from before Clear Selection / Select All.	Восстанавливает выбор до нажатия «Снять выбор» или «Выбрать всё».
+This character has no gathering profession.\n\nTurn on "Allow access to unlearned professions" under Settings > Professions to see every node.	У персонажа нет собирательных профессий.\n\nВключите показ неизученных профессий в разделе «Настройки > Профессии», чтобы увидеть все ресурсы.
+This character has no gathering profession.\n\nTurn on "Allow tracking unlearned professions" under Settings > Professions to see every node.	У персонажа нет собирательных профессий.\n\nВключите показ неизученных профессий в разделе «Настройки > Профессии», чтобы увидеть все ресурсы.
+Only shows when a	Показывается, только если
+Fishing Pole	Удочка
+equipped	экипирована
+to change this	чтобы изменить
+Settings > Professions	Настройки > Профессии
+All settings are in Forever Nodes' own window.	Все настройки находятся в окне Forever Nodes.
+Open Forever Nodes	Открыть Forever Nodes
+Show Settings	Открыть настройки
+It also opens from:	Также можно открыть:
+the world map button (pictured)	кнопкой на карте мира (на рисунке)
+the minimap button	кнопкой у миникарты
+typing	командой
+Miscellaneous	Разное
+Use a floating window instead of docking	Отдельное окно вместо панели на карте
+Recommended:	Рекомендуется:
+Disabled	Выключено
+Only enable if another addon stops the docked window from showing correctly.	Включайте, только если другой аддон мешает отображению панели на карте.
+Icons	Значки
+Panel	Панель
+Docked to world map	Прикреплена к карте мира
+Panel docked to world map	Панель прикреплена к карте мира
+Floating panel	Отдельное окно
+Map icons	Значки на карте
+ON	ВКЛ
+OFF	ВЫКЛ
+Quick Tutorial	Краткое обучение
+Quick-hide icons	Быстро скрыть значки
+Switch between professions	Переключение профессий
+Toggle gathering nodes	Выбор ресурсов для отображения
+skill bar	полоса навыка
+Reveals the trainer list	Открывает список учителей
+Pins a trainer to your map	Отмечает учителя на карте
+Sort by distance or price. Prices include this character's reputation discounts.	Сортируйте по расстоянию или цене. Учтены скидки за репутацию персонажа.
+Sorts gather nodes by level or alphabetically	Сортировка ресурсов по уровню или алфавиту
+All the settings for this addon can be accessed directly inside the panel.	Все настройки аддона доступны прямо в этой панели.
+Okay	Понятно
+Next	Далее
+Done	Готово
+map button	кнопка на карте
+minimap button	кнопка у миникарты
+to open	чтобы открыть
+by Lvcid	автор: Lvcid
+free	бесплатно
+Alliance	Альянс
+Horde	Орда
+Advanced	Дополнительно
+Brown	Коричневая
+Dark	Тёмная

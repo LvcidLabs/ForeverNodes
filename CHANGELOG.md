@@ -1,3 +1,10 @@
+## Unreleased
+
+- Added Russian UI localization with an automatic/client-language default and an
+  independent English/Russian interface selector in Settings > Advanced.
+- Resource names and tooltip matching follow the client locale. Recorded points
+  and selections retain their canonical keys; recognized client names are remembered.
+
 ## 1.4.0
 
 **New**

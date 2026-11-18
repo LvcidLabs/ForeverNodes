@@ -13,7 +13,10 @@ local _, FN = ...
 local byName = {}
 local function Index()
     for _, node in ipairs(FN.nodes) do
-        if node.kind ~= "fish" and node.skill and node.skill > 0 then byName[node.name] = node end
+        if node.kind ~= "fish" and node.skill and node.skill > 0 then
+            byName[node.name] = node
+            byName[FN:NodeName(node)] = node
+        end
     end
 end
 
@@ -77,18 +80,19 @@ function FN:FormatTipLine(node, name, cfg, r, g, b)
     local open, close, sep = FN:TipPieces(cfg)
     local mode = cfg.color
     local level = tostring(node.skill)
-    local text = name or node.name
+    local localized = FN:NodeName(node)
+    local text = name or localized
     if mode == "line" then
         local num = open .. level .. close
         local mid = sep and (" " .. sep .. " ") or " "
-        return c .. (cfg.place == "after" and node.name .. mid .. num
-            or num .. mid .. node.name) .. "|r"
+        return c .. (cfg.place == "after" and localized .. mid .. num
+            or num .. mid .. localized) .. "|r"
     end
     local num
     if mode == "level" then num = open .. c .. level .. "|r" .. close
     elseif mode == "brackets" then num = c .. open .. level .. close .. "|r"
     else num = open .. level .. close end
-    if mode == "name" then text = c .. node.name .. "|r" end
+    if mode == "name" then text = c .. localized .. "|r" end
     local mid = " "
     if sep then mid = " " .. (mode == "brackets" and (c .. sep .. "|r") or sep) .. " " end
     return cfg.place == "after" and (text .. mid .. num) or (num .. mid .. text)
@@ -126,7 +130,7 @@ function FN:ShowWorldTip(owner)
     GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
     for _, node in ipairs(lines) do
         if node.kind == "fish" or not node.skill or node.skill <= 0 then
-            GameTooltip:AddLine(node.name, 1, 1, 1)
+            GameTooltip:AddLine(FN:NodeName(node), 1, 1, 1)
         else
             GameTooltip:AddLine(FN:FormatTipLine(node, nil, cfg), 1, 1, 1)
         end
@@ -182,7 +186,7 @@ end
 
 -- "150 Herbalism": the level on the skill line, in that line's own color and size.
 local function OnSkillLine(tip, node, from, cfg)
-    local want = FN.kindNames[node.kind]
+    local want = FN:ClientName(FN.kindNames[node.kind])
     for i = from, tip:NumLines() do
         local text, fs = LineText(i)
         if text and text == fs.fnDone then
@@ -406,7 +410,7 @@ local function MinimapNode(tip)
     for node in pairs(near) do
         count = count + 1
         only = node
-        local extra = w - NameWidth(node.name, font, size, flags)
+        local extra = w - NameWidth(FN:NodeName(node), font, size, flags)
         node.fnExtra = extra
         if Fits(pads, extra) then fit, fits = node, fits + 1 end
     end
@@ -464,7 +468,7 @@ local function DecorateMinimap(tip)
     if cfg.attach == "skill" then
         -- A skill line of our own under the name, like the overworld tooltip's: "150 Herbalism".
         Restore(tip)
-        tip:AddLine(FN:FormatSkillText(cfg, node.skill, FN.kindNames[node.kind] or ""), r, g, b)
+        tip:AddLine(FN:FormatSkillText(cfg, node.skill, FN:ClientName(FN.kindNames[node.kind] or "")), r, g, b)
         busy = true
         tip:Show()
         busy = false

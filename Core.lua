@@ -47,6 +47,7 @@ FN.kindNames = { herb = "Herbalism", ore = "Mining", fish = "Fishing" }
 local SKILL_LINES = { herb = 182, ore = 186, fish = 356 }
 
 FN.defaults = {
+    uiLocale = "auto", -- UI language only; world names always follow GetLocale()
     range = FN.DEFAULT_RANGE,
     minimap = true,
     worldmap = true,
@@ -954,7 +955,7 @@ local function PrintPoleInfo()
     for _, node in ipairs(FN.nodes) do
         if node.kind == "fish" and FN.enabled[node.key] then pools = pools + 1 end
     end
-    print(("|cffffd100Forever Nodes|r main hand item %s, class %s, subclass %s, fishing pole: %s, pool types ticked: %d")
+    FN:Print(("|cffffd100Forever Nodes|r main hand item %s, class %s, subclass %s, fishing pole: %s, pool types ticked: %d")
         :format(tostring(id), tostring(classID), tostring(subClassID), tostring(CheckPole()), pools))
 end
 
@@ -962,6 +963,7 @@ driver:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" then
         if arg1 ~= ADDON then return end
         InitDB()
+        FN:LoadClientNames()
         self:UnregisterEvent("ADDON_LOADED")
     elseif not db then
         return
@@ -987,7 +989,7 @@ driver:SetScript("OnEvent", function(self, event, arg1)
         local button = db.mapButtonShown and "map button"
             or (FN.MinimapButtonShown and FN:MinimapButtonShown() and "minimap button")
         local also = button and ("|cffffffff or |r|cffffd100" .. button .. "|r") or ""
-        print(("|cffffd100<Forever Nodes>|r |cffffffffv%s by Lvcid|r"
+        FN:Print(("|cffffd100<Forever Nodes>|r |cffffffffv%s by Lvcid|r"
             .. " |cffffffff(|r|cffffd100/fn|r%s|cffffffff to open)|r"):format(version, also))
     elseif event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_EQUIPMENT_CHANGED" then
         local pole = CheckPole()
@@ -1016,7 +1018,7 @@ SlashCmdList.FOREVERNODES = function(text)
     local command = text:match("^%s*(%a+)")
     if command == "help" or command == "tutorial" or command == "dfl" then
         db.spotlightDue = true
-        print("|cffffd100Forever Nodes:|r the quick guide shows the next time the world map opens")
+        FN:Print("|cffffd100Forever Nodes:|r the quick guide shows the next time the world map opens")
         return
     end
     if text:match("^%s*checkpole") then
@@ -1024,14 +1026,14 @@ SlashCmdList.FOREVERNODES = function(text)
     elseif text:match("^%s*ttdebug") then
         -- Prints what the minimap tooltip matching sees (widths, candidates, learned padding).
         FN.tipDebug = not FN.tipDebug
-        print("|cffffd100Forever Nodes:|r minimap tooltip debug " .. (FN.tipDebug and "on" or "off"))
+        FN:Print("|cffffd100Forever Nodes:|r minimap tooltip debug " .. (FN.tipDebug and "on" or "off"))
     elseif text:match("^%s*ttreset") then
         db.tipWidthPads = nil
-        print("|cffffd100Forever Nodes:|r minimap tooltip widths forgotten; they are learned again")
+        FN:Print("|cffffd100Forever Nodes:|r minimap tooltip widths forgotten; they are learned again")
     elseif text:match("^%s*debug") then
         -- Prints where fishing loot came from, to check that pool recording sees pools.
         db.debug = not db.debug
-        print("|cffffd100Forever Nodes:|r debug messages " .. (db.debug and "on" or "off"))
+        FN:Print("|cffffd100Forever Nodes:|r debug messages " .. (db.debug and "on" or "off"))
     else
         FN:OpenFromCommand()
     end

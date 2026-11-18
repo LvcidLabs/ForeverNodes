@@ -92,7 +92,7 @@ local function StockButton(parent, text, width, height, onClick)
     -- The small game font: these sit in tight rows.
     b:SetNormalFontObject("GameFontNormalSmall")
     b:SetHighlightFontObject("GameFontHighlightSmall")
-    b:SetText(text)
+    FN:SetText(b, text)
     b.text = b:GetFontString()
     b:SetScript("OnClick", onClick)
     KeepChatFocus(b)
@@ -179,7 +179,7 @@ local function Label(parent, font, text)
     local fs = parent:CreateFontString(nil, "OVERLAY", font or "GameFontHighlightSmall")
     local skin = Skin()
     if skin and skin.Font then skin.Font(fs) end
-    if text then fs:SetText(text) end
+    if text then FN:SetText(fs, text) end
     return fs
 end
 
@@ -429,7 +429,7 @@ local function IconTab(parent, icon, onClick)
     b.level:SetPoint("BOTTOMRIGHT", -4, 3)
     b.level:SetShadowOffset(1, -1)
     b.level:SetShadowColor(0, 0, 0, 1)
-    b.level:SetText(" ")
+    FN:SetText(b.level, " ")
     -- A dark fade up from the bottom edge of the picture, so the number reads over any icon.
     local fade = b:CreateTexture(nil, "ARTWORK", nil, 2)
     fade:SetColorTexture(1, 1, 1, 1)
@@ -630,12 +630,13 @@ local function MultiToggle(parent, labels, onPick)
         local fs = Label(b, "GameFontHighlightSmall", text)
         local w = math.ceil(fs:GetStringWidth()) + PAD * 2
         fs:SetPoint("CENTER", b, "LEFT", x + w / 2, 0)
+        local divider
         if i > 1 then
-            local divider = Fill(b, "ARTWORK", 1, 1, 1, 0.25)
+            divider = Fill(b, "ARTWORK", 1, 1, 1, 0.25)
             divider:SetSize(1, 12)
             divider:SetPoint("CENTER", b, "LEFT", x, 0)
         end
-        parts[i] = { fs = fs, x = x, w = w }
+        parts[i] = { fs = fs, x = x, w = w, divider = divider }
         x = x + w
     end
     b:SetWidth(x)
@@ -647,6 +648,7 @@ local function MultiToggle(parent, labels, onPick)
     end)
     KeepChatFocus(b)
     function b:SetPick(n)
+        self.localePick = n
         local p = parts[n] or parts[1]
         self.half:ClearAllPoints()
         self.half:SetPoint("TOPLEFT", self, "TOPLEFT", p.x, 0)
@@ -655,6 +657,18 @@ local function MultiToggle(parent, labels, onPick)
             if i == n then q.fs:SetTextColor(1, 1, 1) else q.fs:SetTextColor(MUTED[1], MUTED[2], MUTED[3]) end
         end
     end
+    function b:RefreshLocaleLayout()
+        local offset = 0
+        for _, part in ipairs(parts) do
+            part.x, part.w = offset, math.ceil(part.fs:GetStringWidth()) + PAD * 2
+            part.fs:SetPoint("CENTER", self, "LEFT", offset + part.w / 2, 0)
+            if part.divider then part.divider:SetPoint("CENTER", self, "LEFT", offset, 0) end
+            offset = offset + part.w
+        end
+        self:SetWidth(offset)
+        self:SetPick(self.localePick or 1)
+    end
+    FN.localeLayouts[b] = true
     b:SetPick(1)
     return b
 end
@@ -689,7 +703,7 @@ local function Check(parent, text, get, set)
     label:SetPoint("LEFT", box, "RIGHT", 7, 0)
     c:SetSize(label:GetStringWidth() + 24, 20)
     function c:SetLabel(newText) -- for a tick box whose wording follows another control
-        label:SetText(newText)
+        FN:SetText(label, newText)
         self:SetWidth(label:GetStringWidth() + 24)
     end
     c:SetScript("OnEnter", function() label:SetTextColor(GOLD[1], GOLD[2], GOLD[3]) end)
@@ -775,7 +789,7 @@ local function Slider(parent, text, minValue, maxValue, step, fmt, get, set, onR
     local syncing = false
     s:SetScript("OnValueChanged", function(_, v)
         v = Snapped(v)
-        value:SetText(Text(v))
+        FN:SetText(value, Text(v))
         if not syncing and not onRelease and v ~= get() then set(v) end
     end)
     if onRelease then
@@ -788,7 +802,7 @@ local function Slider(parent, text, minValue, maxValue, step, fmt, get, set, onR
     holder.Sync = function()
         syncing = true
         s:SetValue(get())
-        value:SetText(Text(get()))
+        FN:SetText(value, Text(get()))
         syncing = false
     end
     syncers[#syncers + 1] = holder.Sync
@@ -866,9 +880,9 @@ local function PickerExtras()
     local function Tip(button, title, text)
         button:HookScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(title)
-            GameTooltip:AddLine(text, 1, 1, 1, true)
-            GameTooltip:AddLine("For the system clipboard, click the hex box and use Ctrl+C / Ctrl+V.", 0.6, 0.6, 0.6, true)
+            FN:SetText(GameTooltip, title)
+            GameTooltip:AddLine(FN:Text(text), 1, 1, 1, true)
+            GameTooltip:AddLine(FN:Text("For the system clipboard, click the hex box and use Ctrl+C / Ctrl+V."), 0.6, 0.6, 0.6, true)
             GameTooltip:Show()
         end)
         button:HookScript("OnLeave", function() GameTooltip:Hide() end)
@@ -921,7 +935,7 @@ local function PickColor(color, onChange)
     local extras = PickerExtras()
     extras.color = color
     function extras.sync()
-        if not extras.box:HasFocus() then extras.box:SetText(ColorToHex(color)) end
+        if not extras.box:HasFocus() then FN:SetText(extras.box, ColorToHex(color)) end
     end
     function extras.set(r, g, b, a) -- from the hex box or Paste; six-digit hex keeps the opacity
         a = a or color[4] or 1
@@ -1161,7 +1175,7 @@ local function RefreshNodes()
     page.fishNote:SetShown(current == "fish" and db.onlyPole)
     page.fishLink:SetShown(current == "fish" and db.onlyPole)
 
-    page.title:SetText(current and FN.kindNames[current] or "")
+    FN:SetText(page.title, current and FN.kindNames[current] or "")
     page.sortToggle:SetMode(db.sort)
     page.sortLabel:SetShown(current ~= nil and not compact) -- the side panel has the toggle in its top row
     page.all:SetShown(current ~= nil)
@@ -1220,11 +1234,11 @@ local function RefreshNodes()
             end
         end
         if db.sort == "name" then
-            table.sort(list, function(a, b) return a.name < b.name end)
+            table.sort(list, function(a, b) return FN:NodeName(a) < FN:NodeName(b) end)
         else
             table.sort(list, function(a, b)
                 if a.skill ~= b.skill then return a.skill < b.skill end
-                return a.name < b.name
+                return FN:NodeName(a) < FN:NodeName(b)
             end)
         end
     end
@@ -1278,12 +1292,12 @@ local function RefreshNodes()
         row:SetPoint("TOPLEFT", LIST_BLEED + col * (COL_WIDTH + COL_GAP), -line * ROW_HEIGHT - trainersH)
         row.node = node
         row.icon:SetTexture(node.icon)
-        row.name:SetText(node.name)
+        FN:SetText(row.name, node.name)
         row.mark:SetShown(FN.enabled[node.key] and true or false)
         row:SetEnabled(canTick)
         row.box:SetAlpha(canTick and 1 or 0.4)
         row.mark:SetAlpha(canTick and 1 or 0.4)
-        row.skill:SetText(node.skill > 0 and node.skill or "")
+        FN:SetText(row.skill, node.skill > 0 and node.skill or "")
 
         -- Beyond the current rank, or a profession the character hasn't learned: greyed name,
         -- number and icon, no color wash.
@@ -1638,7 +1652,7 @@ local function BuildHeader(page)
     local function ShowCue(text, outDur)
         if text then
             tweens[bar.text] = nil; tweens[bar.cue] = nil
-            bar.cueText:SetText(text)
+            FN:SetText(bar.cueText, text)
             bar.text:SetAlpha(0); bar.cue:SetAlpha(1)
         else
             FadeTo(bar.cue, 0, outDur or 0, function() bar.text:SetAlpha(1) end)
@@ -1732,10 +1746,10 @@ local function BuildHeader(page)
         lastKind, lastRank = k, learned and info.rank or nil
 
         if learned then
-            bar.text:SetText(("%s %d/%d"):format(FN.kindNames[k], info.rank, info.max))
+            FN:SetText(bar.text, ("%s %d/%d"):format(FN.kindNames[k], info.rank, info.max))
             bar.text:SetTextColor(1, 1, 1)
         else
-            bar.text:SetText(FN.kindNames[k] .. " \194\183 Not learned")
+            FN:SetText(bar.text, FN.kindNames[k] .. " \194\183 Not learned")
             bar.text:SetTextColor(0.85, 0.83, 0.8)
         end
 
@@ -1850,7 +1864,7 @@ local function BuildHeader(page)
         spent = self.hovered
         FadeTo(bar.cue, 0, 0.2); FadeTo(bar.text, 0, 0.2)
         Later(0.2, function()
-            bar.cueText:SetText("Click again to hide")
+            FN:SetText(bar.cueText, "Click again to hide")
             FadeTo(bar.cue, 1, 0.5)
         end)
         Later(1.7, function() FadeTo(bar.cue, 0, 0.5) end)
@@ -1866,25 +1880,25 @@ local function BuildHeader(page)
         local learnedInfo = FN:GetSkillInfo(kind)
         local list, nxt = FN:TrainersFor(kind)
         if not nxt then
-            tip:AddLine(FN.kindNames[kind] .. " \226\128\148 Artisan", 1, 1, 1)
-            tip:AddLine("Fully trained. Nothing left to learn.", 0.6, 0.6, 0.6)
+            tip:AddLine(FN:Text(FN.kindNames[kind] .. " \226\128\148 Artisan"), 1, 1, 1)
+            tip:AddLine(FN:Text("Fully trained. Nothing left to learn."), 0.6, 0.6, 0.6)
             return
         end
-        tip:AddLine((learnedInfo and "Next: " or "Learn: ") .. nxt.name .. " " .. FN.kindNames[kind], 1, 1, 1)
+        tip:AddLine(FN:Text((learnedInfo and "Next: " or "Learn: ") .. nxt.name .. " " .. FN.kindNames[kind]), 1, 1, 1)
         if learnedInfo then
             local ok = learnedInfo.rank >= nxt.skill
-            tip:AddDoubleLine("Requires " .. FN.kindNames[kind], tostring(nxt.skill), 0.6, 0.6, 0.6,
+            tip:AddDoubleLine(FN:Text("Requires " .. FN.kindNames[kind]),FN:Text( tostring(nxt.skill)), 0.6, 0.6, 0.6,
                 ok and 0.13 or 1, ok and 1 or 0.13, 0.13)
         else
-            tip:AddDoubleLine("Requirements", "none", 0.6, 0.6, 0.6, 1, 1, 1)
+            tip:AddDoubleLine(FN:Text("Requirements"),FN:Text( "none"), 0.6, 0.6, 0.6, 1, 1, 1)
         end
         if nxt.level > 0 then
             local ok = UnitLevel("player") >= nxt.level
-            tip:AddDoubleLine("Requires level", tostring(nxt.level), 0.6, 0.6, 0.6, ok and 0.13 or 1, ok and 1 or 0.13, 0.13)
+            tip:AddDoubleLine(FN:Text("Requires level"),FN:Text( tostring(nxt.level)), 0.6, 0.6, 0.6, ok and 0.13 or 1, ok and 1 or 0.13, 0.13)
         end
-        tip:AddDoubleLine("Your gold", Money(GetMoney()), 0.6, 0.6, 0.6, 1, 1, 1)
+        tip:AddDoubleLine(FN:Text("Your gold"),FN:Text( Money(GetMoney())), 0.6, 0.6, 0.6, 1, 1, 1)
         if #list > 0 then
-            tip:AddLine(" ")
+            tip:AddLine(FN:Text(" "))
             local closest = list[1]
             local low = Cheapest(list)
             local cheapest
@@ -1896,14 +1910,14 @@ local function BuildHeader(page)
                 local where = t.town ~= "" and t.town or t.zone
                 local price = Money(t.cost)
                 if t.cost > 0 and not Affordable(t.cost) then price = "|cffff2020" .. price .. "|r" end
-                tip:AddDoubleLine(label .. name .. " |cff9d9d9d\194\183 " .. where .. (t.yards and (" \194\183 " .. Yards(t.yards)) or "") .. "|r",
-                    price, 0.6, 0.6, 0.6, 1, 1, 1)
+                tip:AddDoubleLine(FN:Text(label .. name .. " |cff9d9d9d\194\183 " .. where .. (t.yards and (" \194\183 " .. Yards(t.yards)) or "") .. "|r"),FN:Text(
+                    price), 0.6, 0.6, 0.6, 1, 1, 1)
             end
             if closest == cheapest then Line("Closest & cheapest: ", closest)
             else Line("Closest: ", closest); Line("Cheapest: ", cheapest) end
-            tip:AddLine(" ")
-            tip:AddLine(LMB .. " " .. (page.trainers and page.trainers.open and "Click the bar to hide the trainers"
-                or ("Click the bar for all " .. #list .. (#list == 1 and " trainer" or " trainers"))), 1, 0.82, 0)
+            tip:AddLine(FN:Text(" "))
+            tip:AddLine(FN:Text(LMB .. " " .. (page.trainers and page.trainers.open and "Click the bar to hide the trainers"
+                or ("Click the bar for all " .. #list .. (#list == 1 and " trainer" or " trainers")))), 1, 0.82, 0)
         end
     end
 
@@ -1940,7 +1954,7 @@ local function ScrollBox(parent)
     Smaller(box.fs)
     box.offset = 0
     function box:SetText(t)
-        self.fs:SetText(t)
+        FN:SetText(self.fs, t)
         self:SetOffset(0)
     end
     function box:Overflow()
@@ -2104,7 +2118,7 @@ local function BuildTrainers(page)
     cols:SetHeight(16)
     cols.bg = Fill(cols, "BACKGROUND", 0, 0, 0, 0.25); cols.bg:SetAllPoints()
     cols.label = cols:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall"); Smaller(cols.label, 2)
-    cols.label:SetText("SORT")
+    FN:SetText(cols.label, "SORT")
     local colButtons, colOrder = {}, {}
     local function ColButton(key, text)
         local b = CreateFrame("Button", nil, cols)
@@ -2356,7 +2370,7 @@ local function BuildTrainers(page)
                 local yards = FN:TrainerYards(r.t)
                 local text = DistText(r, yards)
                 if text ~= r.distText then
-                    r.distText = text; r.dist:SetText(text)
+                    r.distText = text; FN:SetText(r.dist, text)
                     L:Place()
                 end
             end
@@ -2393,9 +2407,9 @@ local function BuildTrainers(page)
         end
         L.kind, L.width = kind, width
         local learnedInfo = FN:GetSkillInfo(kind)
-        head.label:SetText(learnedInfo and "Next rank:" or "Learn:")
-        head.rank:SetText(nxt.name)
-        head.count:SetText(#list .. (#list == 1 and " trainer" or " trainers"))
+        FN:SetText(head.label, learnedInfo and "Next rank:" or "Learn:")
+        FN:SetText(head.rank, nxt.name)
+        FN:SetText(head.count, #list .. (#list == 1 and " trainer" or " trainers"))
 
         -- Highlights: every trainer at the lowest price (green row and price), the closest one
         -- (soft white row); both get brighter location and distance text.
@@ -2434,8 +2448,8 @@ local function BuildTrainers(page)
                 f.group = group
                 f:ClearAllPoints(); f:SetPoint("TOPLEFT", child, "TOPLEFT", LIST_BLEED, -y); f:SetWidth(width + LIST_BLEED)
                 local open = not L.collapsed[group]
-                f.fs:SetText(group .. "  |cff6f6d68\194\183  " .. count .. (count == 1 and " trainer" or " trainers") .. "|r")
-                f.arrow:SetText(open and "\226\128\147" or "+")
+                FN:SetText(f.fs, group .. "  |cff6f6d68\194\183  " .. count .. (count == 1 and " trainer" or " trainers") .. "|r")
+                FN:SetText(f.arrow, open and "\226\128\147" or "+")
                 f:Show()
                 y = y + TR_ROW
                 zebra = false
@@ -2472,16 +2486,16 @@ local function BuildTrainers(page)
                 -- Name (reaction color) with its distance, or its continent when far away, dim after it.
                 r.where = (not t.yards and not fold) and t.continent or nil
                 r.nameText = L.NameText(r, t.yards)
-                r.nameBox:SetText(r.nameText)
-                r.distText = L.DistText(r, t.yards); r.dist:SetText(r.distText)
+                FN:SetText(r.nameBox, r.nameText)
+                r.distText = L.DistText(r, t.yards); FN:SetText(r.dist, r.distText)
                 local bright = cheap or near
-                r.locBox:SetText(t.zone .. (t.town ~= "" and (" " .. LOC_DIM .. "(" .. t.town .. ")|r") or ""))
+                FN:SetText(r.locBox, t.zone .. (t.town ~= "" and (" " .. LOC_DIM .. "(" .. t.town .. ")|r") or ""))
                 if bright then r.locBox.fs:SetTextColor(0.86, 0.85, 0.82) else r.locBox.fs:SetTextColor(0.62, 0.6, 0.56) end
                 -- The game's coin icons, in their box. Red when you can't afford it, green for the cheapest.
                 local price = Money(t.cost)
                 if t.cost > 0 and not Affordable(t.cost) then price = "|cffff3030" .. price .. "|r"
                 elseif t.cost > 0 and cheap then price = "|cff40ff40" .. price .. "|r" end
-                r.price:SetText(price)
+                FN:SetText(r.price, price)
                 r:Show()
                 y = y + TR_ROW2
             end
@@ -2541,8 +2555,8 @@ local function BuildNodesPage(page)
         RefreshNodes()
     end)
     undoButton:SetPoint("RIGHT", nodesPage.none, "LEFT", -4, 0)
-    if undoButton.text then undoButton.text:SetText("") end
-    if undoButton.SetText then undoButton:SetText("") end
+    if undoButton.text then FN:SetText(undoButton.text, "") end
+    if undoButton.SetText then FN:SetText(undoButton, "") end
     local arrow = undoButton:CreateTexture(nil, "OVERLAY")
     arrow:SetPoint("CENTER")
     if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo("common-icon-undo") then
@@ -2554,8 +2568,8 @@ local function BuildNodesPage(page)
     end
     undoButton:HookScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText("Undo")
-        GameTooltip:AddLine("Puts back the ticks from before Clear Selection / Select All.", 1, 1, 1, true)
+        FN:SetText(GameTooltip, "Undo")
+        GameTooltip:AddLine(FN:Text("Puts back the ticks from before Clear Selection / Select All."), 1, 1, 1, true)
         GameTooltip:Show()
     end)
     undoButton:HookScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2581,7 +2595,7 @@ local function BuildNodesPage(page)
     -- "equipped" is green while a pole is in hand, red otherwise: a quick check that the addon sees it.
     function FN:UpdatePoleNote()
         local on = FN:PoleEquipped()
-        nodesPage.fishNote:SetText("(Only shows when a |cffffffffFishing Pole|r is "
+        FN:SetText(nodesPage.fishNote, "(Only shows when a |cffffffffFishing Pole|r — "
             .. (on and "|cff33ff33equipped|r" or "|cffff4040equipped|r") .. ")")
     end
     FN:UpdatePoleNote()
@@ -2597,7 +2611,7 @@ local function BuildNodesPage(page)
         line:SetPoint("CENTER")
         line:SetTextColor(0.33, 0.33, 0.33)
         local function Paint(lit)
-            line:SetText("(" .. (lit and ("|cffffd100" .. WORDS .. "|r") or WORDS) .. " to change this)")
+            FN:SetText(line, "(" .. (lit and ("|cffffd100" .. WORDS .. "|r") or WORDS) .. " to change this)")
         end
         Paint(false)
         local measure = Label(link, "GameFontDisableSmall")
@@ -2605,9 +2619,9 @@ local function BuildNodesPage(page)
         local go = CreateFrame("Button", nil, link)
         local function Fit()
             link:SetWidth(line:GetStringWidth())
-            measure:SetText("(")
+            FN:SetText(measure, "(")
             local x = measure:GetStringWidth()
-            measure:SetText(WORDS)
+            FN:SetText(measure, WORDS)
             go:ClearAllPoints()
             go:SetPoint("LEFT", line, "LEFT", x, 0)
             go:SetSize(measure:GetStringWidth(), 14)
@@ -2720,7 +2734,7 @@ local function Section(column, key, title, height, onToggle)
             self.crossbar:Show()
             self.upright:SetShown(collapsed)
         else
-            sign:SetText(collapsed and "+" or "-")
+            FN:SetText(sign, collapsed and "+" or "-")
         end
     end
     header:SetScript("OnClick", function()
@@ -2916,7 +2930,7 @@ local function BuildSettingsPage(columnA, columnB)
             end
             shapeLabel:SetPoint("TOPLEFT", 0, -(y + 5))
             local name = FN:DetectedMinimapShape()
-            detected:SetText("Detected: " .. (name == "ROUND" and "round" or name == "SQUARE" and "square" or name:lower()))
+            FN:SetText(detected, "Detected: " .. (name == "ROUND" and "round" or name == "SQUARE" and "square" or name:lower()))
             detected:SetPoint("TOPLEFT", shapeCards.auto, "BOTTOMLEFT", 0, -4)
             y = y + 46
         end
@@ -3011,7 +3025,9 @@ local function BuildSettingsPage(columnA, columnB)
     -- The gradient on "difficulty coloring": grey, green, yellow, orange, red, letter by letter.
     local function Gradient(text)
         local stops = { { 0.62, 0.62, 0.62 }, { 0.25, 0.75, 0.25 }, { 1, 1, 0 }, { 1, 0.5, 0.25 }, { 1, 0.13, 0.13 } }
-        local out, n = {}, #text
+        local letters = {}
+        for letter in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do letters[#letters + 1] = letter end
+        local out, n = {}, #letters
         for i = 1, n do
             local p = (n > 1) and (i - 1) / (n - 1) * (#stops - 1) or 0
             local a = math.floor(p) + 1
@@ -3019,7 +3035,7 @@ local function BuildSettingsPage(columnA, columnB)
             local f = p - (a - 1)
             local c = {}
             for j = 1, 3 do c[j] = stops[a][j] + (stops[b][j] - stops[a][j]) * f end
-            out[#out + 1] = ("|cff%02x%02x%02x%s|r"):format(math.floor(c[1] * 255), math.floor(c[2] * 255), math.floor(c[3] * 255), text:sub(i, i))
+            out[#out + 1] = ("|cff%02x%02x%02x%s|r"):format(math.floor(c[1] * 255), math.floor(c[2] * 255), math.floor(c[3] * 255), letters[i])
         end
         return table.concat(out)
     end
@@ -3031,7 +3047,7 @@ local function BuildSettingsPage(columnA, columnB)
         Check(page, DIM .. "(A-Z sort)|r Show nodes beyond my profession tier",
             function() return db.azShowBeyond end,
             function(v) db.azShowBeyond = v and true or false; RefreshNodes() end),
-        Check(page, DIM .. "(|r|cffffd100Skill 300|r" .. DIM .. ")|r Mute " .. Gradient("difficulty coloring"),
+        Check(page, function() return DIM .. "(|r|cffffd100Skill 300|r" .. DIM .. ")|r Mute " .. Gradient(FN:Text("difficulty coloring")) end,
             function() return db.muteAtMax end,
             function(v) db.muteAtMax = v and true or false; RefreshNodes() end),
     }
@@ -3179,7 +3195,7 @@ local function BuildSettingsPage(columnA, columnB)
             local list = List()
             local text = list[1][2]
             for _, e in ipairs(list) do if e[1] == v then text = e[2] end end
-            b.text:SetText(text)
+            FN:SetText(b.text, text)
         end
         local function Choose(v) Cfg()[key] = v; hover = nil; ResyncAll(); LayoutTips() end
         b:SetScript("OnClick", function(self)
@@ -3199,7 +3215,7 @@ local function BuildSettingsPage(columnA, columnB)
                 self.menu = MenuUtil.CreateContextMenu(self, function(_, root)
                     if root.SetMinimumWidth then root:SetMinimumWidth(self:GetWidth()) end
                     for _, e in ipairs(List()) do
-                        local item = root:CreateRadio(e[2], function() return Cfg()[key] == e[1] end,
+                        local item = root:CreateRadio(FN:Text(e[2]), function() return Cfg()[key] == e[1] end,
                             function() Choose(e[1]) end)
                         -- Hovering an entry shows it in the preview.
                         if item and item.SetOnEnter then
@@ -3317,20 +3333,20 @@ local function BuildSettingsPage(columnA, columnB)
             line2:SetFont(textFont:GetFont())
         end
         if not cfg.on then
-            line1:SetText(NAME_HEX .. "Liferoot|r")
-            line2:SetText(editingTip == "world" and "" or (LEVEL_HEX .. "Herbalism|r"))
+            FN:SetText(line1, NAME_HEX .. "Liferoot|r")
+            FN:SetText(line2, editingTip == "world" and "" or (LEVEL_HEX .. "Herbalism|r"))
         elseif editingTip == "world" then
             -- Two nodes under the cursor, one line each.
-            line1:SetText(FN:FormatTipLine(SAMPLE2, "|cffffffffKingsblood|r", cfg, 1, 1, 0))
-            line2:SetText(FN:FormatTipLine(SAMPLE, "|cffffffffLiferoot|r", cfg, 1, 0.5, 0.25))
+            FN:SetText(line1, FN:FormatTipLine(SAMPLE2, "|cffffffffKingsblood|r", cfg, 1, 1, 0))
+            FN:SetText(line2, FN:FormatTipLine(SAMPLE, "|cffffffffLiferoot|r", cfg, 1, 0.5, 0.25))
         elseif skill then
-            line1:SetText(NAME_HEX .. "Liferoot|r")
-            line2:SetText(LEVEL_HEX .. FN:FormatSkillText(cfg, "150", "Herbalism") .. "|r")
+            FN:SetText(line1, NAME_HEX .. "Liferoot|r")
+            FN:SetText(line2, LEVEL_HEX .. FN:FormatSkillText(cfg, "150", "Herbalism") .. "|r")
         else
             -- The world map tooltip is our own (white text); the others keep the game's gold name.
             local name = editingTip == "world" and "|cffffffffLiferoot|r" or (NAME_HEX .. "Liferoot|r")
-            line1:SetText(FN:FormatTipLine(SAMPLE, name, cfg, 1, 0.5, 0.25))
-            line2:SetText(editingTip == "minimap" and "" or editingTip == "overworld" and (LEVEL_HEX .. "Herbalism|r") or "")
+            FN:SetText(line1, FN:FormatTipLine(SAMPLE, name, cfg, 1, 0.5, 0.25))
+            FN:SetText(line2, editingTip == "minimap" and "" or editingTip == "overworld" and (LEVEL_HEX .. "Herbalism|r") or "")
         end
         -- Tall enough for its lines at any text size (never less than it was).
         local h = 10 + line1:GetStringHeight() + 10
@@ -3396,7 +3412,7 @@ local function BuildSettingsPage(columnA, columnB)
     if skin and skin.EditBox then skin.EditBox(range) end
     local function ApplyRange(self)
         local value = math.min(math.max(tonumber(self:GetText()) or FN.DEFAULT_RANGE, 0), 250)
-        self:SetText(value)
+        FN:SetText(self, value)
         self:ClearFocus()
         if value ~= db.range then
             db.range = value
@@ -3406,10 +3422,10 @@ local function BuildSettingsPage(columnA, columnB)
     range:SetScript("OnEnterPressed", ApplyRange)
     range:SetScript("OnEditFocusLost", ApplyRange)
     range:SetScript("OnEscapePressed", function(self)
-        self:SetText(db.range)
+        FN:SetText(self, db.range)
         self:ClearFocus()
     end)
-    syncers[#syncers + 1] = function() range:SetText(db.range) end
+    syncers[#syncers + 1] = function() FN:SetText(range, db.range) end
     local yards = Label(page, nil, "yds")
     yards:SetPoint("LEFT", range, "RIGHT", 6, 0)
     local hint = Label(page, "GameFontDisableSmall",
@@ -3450,7 +3466,7 @@ local function BuildSettingsPage(columnA, columnB)
             local pick = entries[1]
             for _, e in ipairs(entries) do if e[1] == get() then pick = e end end
             local wide = b:GetWidth() >= 120
-            b.text:SetText((wide and pick[3]) or pick[4] or pick[3] or pick[2])
+            FN:SetText(b.text, (wide and pick[3]) or pick[4] or pick[3] or pick[2])
         end
         b.Refresh = Refresh
         b:SetScript("OnClick", function(self)
@@ -3468,7 +3484,7 @@ local function BuildSettingsPage(columnA, columnB)
                 self.menu = MenuUtil.CreateContextMenu(self, function(_, root)
                     if root.SetMinimumWidth then root:SetMinimumWidth(self:GetWidth()) end
                     for _, e in ipairs(entries) do
-                        root:CreateRadio(e[2], function() return get() == e[1] end, function()
+                        root:CreateRadio(FN:Text(e[2]), function() return get() == e[1] end, function()
                             set(e[1])
                             ResyncAll()
                             Refit()
@@ -3890,6 +3906,27 @@ local function BuildSettingsPage(columnA, columnB)
         local moved = FN:MapButtonMoved()
         resetButton:SetEnabled(moved)
         resetButton:SetAlpha(moved and 1 or 0.4)
+    end
+
+    GroupTitle("Interface language", -390, true)
+    local languageChoices = { "auto", "ruRU", "enUS" }
+    local language
+    language = MultiToggle(page, { "Auto", "Russian", "English" }, function(i)
+        FN:SetUILocale(languageChoices[i])
+    end)
+    language:SetPoint("TOP", 0, -412)
+    local languageNote = Label(page, "GameFontDisableSmall", "Node names always follow the client language.")
+    languageNote:SetPoint("TOPLEFT", 0, -442)
+    languageNote:SetWidth(240)
+    languageNote:SetJustifyH("LEFT")
+    syncers[#syncers + 1] = function()
+        for i, locale in ipairs(languageChoices) do
+            if (db.uiLocale or "auto") == locale then language:SetPick(i) end
+        end
+    end
+    -- The window section now also contains the language picker.
+    for _, section in ipairs(sectionsB) do
+        if section.key == "window" then section.height = 475 end
     end
 
     -- Last of all on every sync: stack the sections at their current sizes.
@@ -4578,10 +4615,10 @@ local function ApplyLayout()
             local known = skills[key] ~= nil
             local icon = ProfessionIcon(key)
             row.pic:SetTexture(icon)
-            row.tag:SetText(known and skills[key] or "")
+            FN:SetText(row.tag, known and skills[key] or "")
             row:SetDimmed(not known)
             tab.pic:SetTexture(icon)
-            tab.level:SetText(known and skills[key] or "")
+            FN:SetText(tab.level, known and skills[key] or "")
             tab:SetDimmed(not known)
             firstProfession = firstProfession or key
         end
@@ -4699,7 +4736,7 @@ local function CreateOptions()
     -- Title, centered in the strip like the game's own windows.
     local stockTitle = framed and (shell.TitleText or (shell.TitleContainer and shell.TitleContainer.TitleText))
     if stockTitle then
-        stockTitle:SetText(TITLE)
+        FN:SetText(stockTitle, TITLE)
     else
         local title = Label(shell, "GameFontNormal", TITLE)
         title:SetPoint("TOP", 10, -6)
