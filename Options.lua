@@ -1356,6 +1356,7 @@ local KIT = { herb = "Herbalism", ore = "Mining", fish = "Fishing" }
 -- How far down each card's crop starts: the illustrations sit mid-card, below the empty top edge.
 local ART_DOWN = { herb = 40, ore = 40, fish = 150 }
 local GLOW = { herb = { 0.35, 1, 0.6 }, ore = { 0.69, 0.8, 0.92 }, fish = { 0.35, 0.86, 1 } }
+local GLOW_STRENGTH = { herb = 1.3, ore = 1.3, fish = 0.93 } -- evens out how bright each color reads
 local BAR_H = 24        -- hit area; the fill itself is the native 18px tall
 local FILL_H = 18
 local HEADER_H = 34       -- space the header adds above the list (bar plus breathing room)
@@ -1515,7 +1516,7 @@ local function BuildHeader(page)
     -- Everything drawn over the fill lives on a frame above the fill's clip frame.
     bar.over = CreateFrame("Frame", nil, bar)
     bar.over:SetAllPoints()
-    bar.over:SetFrameLevel(bar.clip:GetFrameLevel() + 1)
+    bar.over:SetFrameLevel(bar.clip:GetFrameLevel() + 2) -- room between them for the cap glow
     bar.frame = bar.over:CreateTexture(nil, "ARTWORK")
     bar.frame:SetPoint("TOPLEFT")
 
@@ -1568,25 +1569,46 @@ local function BuildHeader(page)
     bar.glow:SetAllPoints()
     bar.glow:SetFrameLevel(bar.over:GetFrameLevel() + 2)
     bar.glow:SetAlpha(0)
-    bar.glowTex = bar.glow:CreateTexture(nil, "OVERLAY")
-    bar.glowTex:SetPoint("TOPLEFT")
-    bar.glowTex:SetBlendMode("ADD")
+    -- A soft line with a tight halo, following the frame's rounded shape. The 64 x 64 picture
+    -- shows a 20 tall rounded box, 22 in from every edge: it is cut into a left end, a stretched
+    -- middle and a right end, so the line lands on the middle of the bar's frame at any scale.
+    -- Drawn twice, so the line stands out on the frame.
+    bar.glowParts = {}
+    local function GlowPart(l, r)
+        local t = bar.glow:CreateTexture(nil, "OVERLAY")
+        t:SetTexture(FN.MEDIA .. "bar_glow")
+        t:SetTexCoord(l, r, 0, 1)
+        t:SetBlendMode("ADD")
+        bar.glowParts[#bar.glowParts + 1] = t
+        return t
+    end
+    for _ = 1, 2 do
+        local left, right, middle = GlowPart(0, 0.5), GlowPart(0.5, 1), GlowPart(0.49, 0.51)
+        left:SetSize(32, 64)
+        left:SetPoint("TOPLEFT", bar, "TOPLEFT", 1 - 22, -2 + 22)
+        right:SetSize(32, 64)
+        right:SetPoint("TOPRIGHT", bar, "TOPRIGHT", -1 + 22, -2 + 22)
+        middle:SetPoint("TOPLEFT", left, "TOPRIGHT")
+        middle:SetPoint("BOTTOMRIGHT", right, "BOTTOMLEFT")
+    end
 
     -- Ready-to-train pulse at a cap: the bar's right end and top line swell softly.
     -- They live on their own frame, and the frame is what fades and pulses (gradient
-    -- textures in this client don't reliably follow their own alpha).
-    bar.capF = CreateFrame("Frame", nil, bar.over)
+    -- textures in this client don't reliably follow their own alpha). It sits under the bar's
+    -- frame art, which covers its ends.
+    bar.capF = CreateFrame("Frame", nil, bar)
     bar.capF:SetAllPoints()
+    bar.capF:SetFrameLevel(bar.clip:GetFrameLevel() + 1)
     bar.capF:Hide()
     bar.capEdge = bar.capF:CreateTexture(nil, "OVERLAY", nil, 3)
     bar.capEdge:SetBlendMode("ADD")
-    bar.capEdge:SetPoint("TOPRIGHT", bar, "TOPRIGHT", -7, -3)
-    bar.capEdge:SetHeight(FILL_H)
+    bar.capEdge:SetPoint("TOPRIGHT", bar, "TOPRIGHT", -3, -4)
+    bar.capEdge:SetHeight(FILL_H - 2)
     bar.capEdge:SetWidth(34)
     bar.capLine = bar.capF:CreateTexture(nil, "OVERLAY", nil, 3)
     bar.capLine:SetBlendMode("ADD")
-    bar.capLine:SetPoint("TOPLEFT", bar, "TOPLEFT", 8, -3)
-    bar.capLine:SetPoint("TOPRIGHT", bar, "TOPRIGHT", -7, -3)
+    bar.capLine:SetPoint("TOPLEFT", bar, "TOPLEFT", 3, -4)
+    bar.capLine:SetPoint("TOPRIGHT", bar, "TOPRIGHT", -3, -4)
     bar.capLine:SetHeight(1)
     bar.capPulse = bar.capF:CreateAnimationGroup()
     bar.capPulse:SetLooping("REPEAT")
@@ -1659,7 +1681,7 @@ local function BuildHeader(page)
         bar:ClearAllPoints()
         bar:SetPoint("TOPLEFT", pf, "TOPLEFT", 0, -32)
         bar:SetWidth(width)
-        bar.bg:SetWidth(width - 4)
+        bar.bg:SetWidth(width - 5)
         bar.text:ClearAllPoints()
         bar.text:SetPoint("CENTER", bar, "TOPLEFT", width / 2, -3 - FILL_H / 2)
         bar.frame:SetAtlas("Profession-ProgressBar-frame", true); bar.frame:SetWidth(width)
@@ -1682,7 +1704,7 @@ local function BuildHeader(page)
         local flareAtlas = "Skillbar_Flare_" .. KIT[k]
         if C_Texture.GetAtlasInfo(flareAtlas) then bar.flare:SetAtlas(flareAtlas, false); bar.flare:Show() else bar.flare:Hide() end
 
-        local inner = width - 4 -- 2px in from the frame on both ends
+        local inner = width - 5 -- stops inside the frame's rounded right end
         local ratio = learned and info.max > 0 and math.min(info.rank / info.max, 1) or 0
         local target = math.max(1, inner * ratio)
         local full = learned and info.rank >= info.max
@@ -1718,9 +1740,10 @@ local function BuildHeader(page)
         end
 
         local c = GLOW[k]
-        bar.glowTex:SetAtlas("Profession-ProgressBar-frame", true)
-        bar.glowTex:SetWidth(width)
-        bar.glowTex:SetVertexColor(c[1], c[2], c[3], learned and 0.9 or 0.5)
+        for i, t in ipairs(bar.glowParts) do
+            local strength = i <= 3 and 0.8 or 0.45 -- the first pass, then the second on top of it
+            t:SetVertexColor(c[1], c[2], c[3], strength * GLOW_STRENGTH[k] * (learned and 1 or 0.55))
+        end
         bar.capEdge:SetColorTexture(1, 1, 1, 1)
         bar.capLine:SetColorTexture(1, 1, 1, 1)
         if bar.capEdge.SetGradient and CreateColor then
