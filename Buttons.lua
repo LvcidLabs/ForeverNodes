@@ -113,6 +113,7 @@ local function SetupWorldMapButton()
     if not map then return end
     local viewport = map.ScrollContainer or map
 
+    local unlocked = false -- the button is being placed: it can be dragged and does nothing else
     local btn = CreateFrame("Button", "ForeverNodesWorldMapButton", map)
     btn:SetSize(26, 26)
     btn:SetFrameLevel(math.min(map:GetFrameLevel() + 2000, 9900))
@@ -139,6 +140,7 @@ local function SetupWorldMapButton()
         end
     end
     local function ShowTip(self)
+        if unlocked then return end
         local line = (mouseAtlas and "" or "RMB: ") .. "Map icons <%s>"
         FN.ShowTipLeftOf(self, TITLE,
             line:format(FN.db.worldmap and "|cff33ff33ON|r" or "|cffff4040OFF|r"),
@@ -147,6 +149,7 @@ local function SetupWorldMapButton()
     end
     btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     btn:SetScript("OnClick", function(self, button)
+        if unlocked then return end
         if button == "RightButton" then
             FN:ToggleWorldMapIcons()
             ShowTip(self) -- same tooltip, new state
@@ -290,6 +293,26 @@ local function SetupWorldMapButton()
         end
     end
 
+    -- Where the button sits: where the player put it (saved as a share of the map's width and
+    -- height, kept inside the map), or above the quest log's arrow.
+    local function Anchor()
+        btn:ClearAllPoints()
+        local pos = FN.db.mapButtonPos
+        local ratio = viewport:GetEffectiveScale() / btn:GetEffectiveScale()
+        local w, h = viewport:GetWidth() * ratio, viewport:GetHeight() * ratio
+        if pos and w > 0 and h > 0 then
+            local halfW, halfH = btn:GetWidth() / 2, btn:GetHeight() / 2
+            btn:SetPoint("CENTER", viewport, "BOTTOMLEFT",
+                math.max(halfW, math.min(w - halfW, pos.x * w)),
+                math.max(halfH, math.min(h - halfH, pos.y * h)))
+        elseif not arrow then
+            btn:SetPoint("BOTTOMRIGHT", viewport, "BOTTOMRIGHT", -8, 48)
+        else
+            -- Always above the arrow: both buttons' labels open to the left.
+            btn:SetPoint("BOTTOM", arrow, "TOP", 0, 0)
+        end
+    end
+
     local skinned = false
     local function Place()
         btn:SetFrameLevel(math.min(map:GetFrameLevel() + 2000, 9900))
@@ -324,16 +347,378 @@ local function SetupWorldMapButton()
             btn:SetSize(26, 26)
         end
 
-        btn:ClearAllPoints()
-        if not arrow then
-            btn:SetPoint("BOTTOMRIGHT", viewport, "BOTTOMRIGHT", -8, 48)
-        else
-            -- Always above the arrow: both buttons' labels open to the left.
-            btn:SetPoint("BOTTOM", arrow, "TOP", 0, 0)
-        end
+        Anchor()
+        btn:SetShown(FN.db.mapButtonShown)
     end
     Place()
     map:HookScript("OnShow", Place)
+
+    -- First install: the first time the map opens it dims, except for a circle around this
+    -- button, with a note beside it. "Quick Tutorial" walks through the panel step by step.
+    -- The tour ends back on this note, so a step can be seen again; only "Okay" ends it for good
+    -- (closing the map just brings the note back next time). Other clicks on the dimmed map do
+    -- nothing, except on what a step invites the player to try. It is drawn on its own top layer,
+    -- above the map and everything in the panel. The circle and the note follow the button wherever it is.
+    local TOUR_STEPS = 6
+    local spot, dim, hole, ring, mapDim, focus, tourClick
+    local note, noteArrow, noteHead, noteText, noteCount, noteLeft, noteRight
+    local tourStep -- nil on the opening note
+    local GoToStep
+
+    local function Glyph(atlases)
+        for _, atlas in ipairs(atlases) do
+            if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas) then
+                return "|A:" .. atlas .. ":16:16|a "
+            end
+        end
+        return ""
+    end
+    local LMB = Glyph({ "NPE_LeftClick", "newplayertutorial-icon-mouse-leftbutton" })
+    local RMB = Glyph({ "NPE_RightClick", "newplayertutorial-icon-mouse-rightbutton" })
+    local OPENING_TEXT = LMB .. "Open\n" .. RMB .. "Quick-hide icons"
+    local STEP_TEXT = {
+        LMB .. "Switch between professions",
+        LMB .. "Toggle gathering nodes",
+        LMB .. "|cff808080(skill bar)|r Reveals the trainer list",
+        LMB .. "Pins a trainer to your map\n\nSort by distance or price. Prices include this character's reputation discounts.",
+        LMB .. "Sorts gather nodes by level or alphabetically",
+        "All the settings for this addon can be accessed directly inside the panel.",
+    }
+
+    local function CloseSpotlight()
+        tourStep = nil
+        if spot then spot:Hide() end
+        if FN.TourFinish then FN:TourFinish() end
+    end
+    local function EndSpotlight()
+        FN.db.spotlightDue = nil
+        CloseSpotlight()
+    end
+    local BackToOpening
+    local function FadeIn(self, elapsed)
+        self.faded = self.faded + elapsed
+        self:SetAlpha(math.min(self.faded / 0.3, 1))
+        if self.faded >= 0.3 then self:SetScript("OnUpdate", nil) end
+    end
+
+    local function NoteButton(onSide)
+        local b = CreateFrame("Button", nil, note, "UIPanelButtonTemplate")
+        b:SetHeight(22)
+        b:SetPoint(onSide, onSide == "BOTTOMLEFT" and 12 or -12, 12)
+        return b
+    end
+    local function BuildSpotlight()
+        spot = CreateFrame("Frame", nil, UIParent)
+        spot:SetFrameStrata("TOOLTIP")
+        spot:SetFrameLevel(100)
+        spot:SetAllPoints(map)
+        spot:EnableMouse(true)
+        -- The panel's steps dim only the map beside the panel; the gold highlight does the rest.
+        mapDim = spot:CreateTexture(nil, "BACKGROUND")
+        mapDim:SetColorTexture(0, 0, 0, 0.75)
+        mapDim:SetPoint("TOPLEFT")
+        mapDim:SetPoint("BOTTOMLEFT")
+        dim = spot:CreateTexture(nil, "BACKGROUND")
+        dim:SetAllPoints()
+        dim:SetTexture("Interface\\Buttons\\WHITE8X8")
+        dim:SetVertexColor(0, 0, 0, 0.75)
+        -- Clear in the middle; everything beyond the picture's edge stays dimmed.
+        hole = spot:CreateMaskTexture()
+        hole:SetTexture(FN.MEDIA .. "spotlight_mask", "CLAMPTOWHITEADDITIVE", "CLAMPTOWHITEADDITIVE")
+        dim:AddMaskTexture(hole)
+        ring = spot:CreateTexture(nil, "ARTWORK") -- the gold edge of the circle
+        ring:SetTexture(FN.MEDIA .. "spotlight_ring")
+
+        -- The gold edge of a square focus, with a soft glow outside it, like the note's own.
+        focus = CreateFrame("Frame", nil, spot)
+        focus:SetFrameLevel(102)
+        local edge = focus:CreateTexture(nil, "OVERLAY")
+        edge:SetTexture(FN.MEDIA .. "spotlight_focus")
+        edge:SetTextureSliceMargins(20, 20, 20, 20)
+        edge:SetPoint("TOPLEFT", -12, 12)
+        edge:SetPoint("BOTTOMRIGHT", 12, -12)
+
+        -- Over what a step invites the player to click: passes the click on to the real thing.
+        tourClick = CreateFrame("Button", nil, spot)
+        tourClick:SetFrameLevel(105)
+        tourClick:RegisterForClicks("LeftButtonUp")
+        tourClick:SetScript("OnClick", function()
+            if tourStep == 5 then
+                FN:TourSort()
+            else
+                GoToStep(tourStep + 1)
+            end
+        end)
+
+        -- The note: the game's own gold help box, its arrow pointing at what it is about.
+        note = CreateFrame("Frame", nil, spot, "GlowBoxTemplate")
+        note:SetFrameLevel(110)
+        note:SetWidth(226)
+        note:EnableMouse(true)
+        noteHead = note:CreateFontString(nil, "OVERLAY", "GameFontHighlightLeft")
+        noteHead:SetPoint("TOPLEFT", 15, -15)
+        noteHead:SetText("|cffffd100[Forever Nodes]|r |cff707070by Lvcid|r")
+        noteText = note:CreateFontString(nil, "OVERLAY", "GameFontHighlightLeft")
+        noteText:SetWidth(196)
+        noteText:SetJustifyV("TOP")
+        noteText:SetSpacing(3)
+        noteCount = note:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        noteCount:SetPoint("BOTTOMLEFT", 16, 18)
+        noteLeft = NoteButton("BOTTOMLEFT")
+        noteLeft:SetWidth(104)
+        noteLeft:SetText("Quick Tutorial")
+        noteLeft:SetScript("OnClick", function() GoToStep(1) end)
+        noteRight = NoteButton("BOTTOMRIGHT")
+        noteRight:SetWidth(84)
+        noteRight:SetScript("OnClick", function()
+            if not tourStep then
+                EndSpotlight()
+            elseif tourStep < TOUR_STEPS then
+                GoToStep(tourStep + 1)
+            else
+                BackToOpening()
+            end
+        end)
+        noteArrow = CreateFrame("Frame", nil, note, "GlowBoxArrowTemplate")
+        noteArrow:SetSize(61, 61)
+        noteArrow.Arrow:ClearAllPoints()
+        noteArrow.Arrow:SetPoint("CENTER")
+    end
+
+    local function PointArrow(onRight, arrowY)
+        noteArrow:ClearAllPoints()
+        noteArrow.Glow:ClearAllPoints()
+        noteArrow:SetPoint("CENTER", note, onRight and "LEFT" or "RIGHT", onRight and -5 or 5, arrowY)
+        noteArrow.Glow:SetPoint("CENTER", noteArrow.Arrow, "CENTER", onRight and -4 or 4, 0)
+        SetClampedTextureRotation(noteArrow.Arrow, onRight and 90 or 270)
+        SetClampedTextureRotation(noteArrow.Glow, onRight and 90 or 270)
+    end
+    local function ArrowRoom(y)
+        local most = note:GetHeight() / 2 - 20
+        return math.max(-most, math.min(most, y))
+    end
+
+    -- The circle: the note goes on the side of the button with more room, inside the map.
+    local function PlaceNote()
+        local bx, by = btn:GetCenter()
+        local left, right = viewport:GetLeft(), viewport:GetRight()
+        local top, bottom = viewport:GetTop(), viewport:GetBottom()
+        if not (bx and left and top) then return end
+        local ratio = viewport:GetEffectiveScale() / btn:GetEffectiveScale()
+        local room = note:GetHeight() / 2 + 8
+        local dy = math.max(bottom * ratio + room - by, math.min(top * ratio - room - by, 0))
+        local onRight = bx < (left + right) / 2 * ratio
+        note:ClearAllPoints()
+        if onRight then
+            note:SetPoint("LEFT", btn, "RIGHT", 20, dy)
+        else
+            note:SetPoint("RIGHT", btn, "LEFT", -20, dy)
+        end
+        PointArrow(onRight, ArrowRoom(-dy))
+    end
+
+    -- The gold edge around a focused area, given in screen pixels.
+    local function DrawFocus(r)
+        local scale = spot:GetEffectiveScale()
+        focus:ClearAllPoints()
+        focus:SetPoint("BOTTOMLEFT", spot, "BOTTOMLEFT", r.l / scale - spot:GetLeft(), r.b / scale - spot:GetBottom())
+        focus:SetSize((r.r - r.l) / scale, (r.t - r.b) / scale)
+        focus:Show()
+    end
+
+    -- The circle around `target`, its clear middle fitting a thing of about that size.
+    local function DrawCircle(target, size)
+        mapDim:Hide()
+        focus:Hide()
+        dim:Show()
+        for _, part in ipairs({ hole, ring }) do
+            part:ClearAllPoints()
+            part:SetPoint("CENTER", target)
+            part:SetSize(size, size)
+        end
+        ring:Hide() -- the map button has the plain spotlight
+    end
+
+    -- Puts the dimming and the note where the current step wants them.
+    local function Render()
+        if not (spot and spot:IsShown()) then return end
+        local info = tourStep and FN:TourRects(tourStep)
+        if not info then
+            tourClick:Hide()
+            DrawCircle(btn, 200)
+            PlaceNote()
+            return
+        end
+        local scale = spot:GetEffectiveScale()
+        dim:Hide()
+        mapDim:SetWidth(math.max(1, info.left / scale - spot:GetLeft()))
+        mapDim:Show()
+        if info.circle then
+            focus:Hide()
+            tourClick:Hide()
+            ring:ClearAllPoints()
+            ring:SetPoint("CENTER", info.circle)
+            ring:SetSize(84, 84)
+            ring:Show()
+        else
+            ring:Hide()
+            local r = info.rects[1]
+            DrawFocus(r)
+            tourClick:SetShown(info.click)
+            tourClick:ClearAllPoints()
+            tourClick:SetPoint("BOTTOMLEFT", spot, "BOTTOMLEFT", r.l / scale - spot:GetLeft(), r.b / scale - spot:GetBottom())
+            tourClick:SetSize((r.r - r.l) / scale, (r.t - r.b) / scale)
+        end
+        -- Left of the panel, level with what it is about, and inside the map.
+        local y = info.y / scale - spot:GetBottom()
+        local room = note:GetHeight() / 2 + 8
+        local noteY = math.max(room, math.min(spot:GetHeight() - room, y))
+        note:ClearAllPoints()
+        note:SetPoint("RIGHT", spot, "BOTTOMLEFT", info.left / scale - spot:GetLeft() - 24, noteY)
+        PointArrow(false, ArrowRoom(y - noteY))
+    end
+    local function RenderSoon()
+        Render()
+        C_Timer.After(0, Render) -- once the map has finished laying itself out
+        C_Timer.After(0.1, Render)
+    end
+
+    local function FillNote()
+        local opening = tourStep == nil
+        noteHead:SetShown(opening)
+        noteText:ClearAllPoints()
+        noteText:SetPoint("TOPLEFT", 15, opening and -37 or -15)
+        noteText:SetWidth(600)
+        noteText:SetText(opening and OPENING_TEXT or STEP_TEXT[tourStep])
+        -- Wide enough to keep a short line on one row; a long sentence wraps.
+        local noteWidth = math.min(320, math.max(226, math.ceil(noteText:GetStringWidth()) + 32))
+        note:SetWidth(noteWidth)
+        noteText:SetWidth(noteWidth - 30)
+        noteCount:SetText(opening and "" or (tourStep .. "/" .. TOUR_STEPS))
+        local guide = opening and FN:TourAvailable()
+        noteLeft:SetShown(guide)
+        -- The opening note's buttons are centered, one to a row; the steps' sits at the right.
+        noteRight:ClearAllPoints()
+        if opening then
+            noteRight:SetWidth(150)
+            noteRight:SetPoint("BOTTOM", 0, 12)
+            noteLeft:SetWidth(150)
+            noteLeft:ClearAllPoints()
+            noteLeft:SetPoint("BOTTOM", noteRight, "TOP", 0, 4)
+        else
+            noteRight:SetWidth(84)
+            noteRight:SetPoint("BOTTOMRIGHT", -12, 12)
+        end
+        noteRight:SetText(opening and "Okay" or (tourStep < TOUR_STEPS and "Next" or "Done"))
+        note:SetHeight((opening and 37 or 15) + noteText:GetStringHeight() + 14 + (guide and 26 or 0) + 22 + 12)
+    end
+    GoToStep = function(step)
+        tourStep = step
+        -- A step with nothing to show (no trainer to pin at the top rank) is passed over.
+        if FN:TourPrepare(step) == false then return GoToStep(step + 1) end
+        FillNote()
+        RenderSoon()
+    end
+    BackToOpening = function()
+        tourStep = nil
+        FN:TourFinish() -- the panel closes and everything is as it was
+        FillNote()
+        RenderSoon()
+    end
+    local function ShowSpotlight()
+        if not (FN.db.spotlightDue and btn:IsShown()) or tourStep then return end
+        if not spot then BuildSpotlight() end
+        spot:SetScale(map:GetEffectiveScale() / UIParent:GetEffectiveScale())
+        spot.faded = 0
+        spot:SetAlpha(0)
+        spot:SetScript("OnUpdate", FadeIn)
+        spot:Show()
+        FillNote()
+        RenderSoon()
+    end
+    map:HookScript("OnShow", ShowSpotlight)
+    -- The map can blink while it resizes: only a map that stays closed ends this.
+    map:HookScript("OnHide", function()
+        C_Timer.After(0, function()
+            if spot and spot:IsShown() and not map:IsShown() then CloseSpotlight() end
+        end)
+    end)
+    viewport:HookScript("OnSizeChanged", function()
+        Anchor()
+        Render()
+    end)
+
+    -- Moving the button: unlocked from the settings, it glows like a proc on the action bars,
+    -- follows a left-button drag inside the map, and locks again when the map closes.
+    local moveGlow
+    local function ShowMoveGlow(on)
+        if on and not moveGlow then
+            local ok, made = pcall(CreateFrame, "Frame", nil, btn, "ActionButtonSpellAlertTemplate")
+            if ok then
+                moveGlow = made
+                moveGlow:SetPoint("CENTER")
+                moveGlow.ProcStartFlipbook:Hide()
+            end
+        end
+        if not moveGlow then return end
+        moveGlow:SetSize(btn:GetWidth() * 1.4, btn:GetHeight() * 1.4)
+        moveGlow:SetShown(on)
+        if on then moveGlow.ProcLoop:Play() end
+    end
+    local function FollowCursor()
+        local x, y = GetCursorPosition()
+        local scale = viewport:GetEffectiveScale()
+        local w, h = viewport:GetWidth(), viewport:GetHeight()
+        if w <= 0 or h <= 0 then return end
+        FN.db.mapButtonPos = {
+            x = math.max(0, math.min(1, (x / scale - viewport:GetLeft()) / w)),
+            y = math.max(0, math.min(1, (y / scale - viewport:GetBottom()) / h)),
+        }
+        Anchor()
+        Render()
+    end
+    local function StopDragging()
+        btn:SetScript("OnUpdate", nil)
+    end
+    btn:RegisterForDrag("LeftButton")
+    btn:SetScript("OnDragStart", function(self)
+        if not unlocked then return end
+        FN.HideTip()
+        self:SetScript("OnUpdate", FollowCursor)
+    end)
+    btn:SetScript("OnDragStop", function()
+        StopDragging()
+        if FN.RefreshOptions then FN:RefreshOptions() end -- "Reset position" can be used now
+    end)
+    btn:HookScript("OnHide", StopDragging)
+
+    local function SetUnlocked(on)
+        if on == unlocked then return end
+        unlocked = on
+        if not on then StopDragging() end
+        FN.HideTip()
+        ShowMoveGlow(on)
+        if FN.RefreshOptions then FN:RefreshOptions() end
+    end
+    map:HookScript("OnHide", function() SetUnlocked(false) end)
+
+    function FN:MapButtonShown() return FN.db.mapButtonShown end
+    function FN:SetMapButtonShown(shown)
+        FN.db.mapButtonShown = shown
+        if not shown then SetUnlocked(false) end
+        btn:SetShown(shown)
+        if FN.RefreshOptions then FN:RefreshOptions() end
+    end
+    function FN:MapButtonLocked() return not unlocked end
+    function FN:SetMapButtonLocked(locked) SetUnlocked(not locked) end
+    function FN:MapButtonMoved() return FN.db.mapButtonPos ~= nil end
+    function FN:ResetMapButton()
+        StopDragging()
+        FN.db.mapButtonPos = nil
+        Anchor()
+        Render()
+        if FN.RefreshOptions then FN:RefreshOptions() end
+    end
 end
 
 -- Right click on either button: world map icons on or off.

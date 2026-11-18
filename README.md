@@ -2,7 +2,7 @@
 
 # Forever Nodes
 
-Tired of alt-tabbing to Wowhead? Forever Nodes puts WoW: Forever's gathering nodes right on your map, and keeps an eye on your skill so you never farm 20 minutes past a rank cap.
+Forever Nodes puts WoW: Forever's herbs, ore and fishing pools on your map, and shows you when and where to train.
 
 <p align="center">
   <img src="https://github.com/user-attachments/assets/6e34b0ad-d207-44dc-8f59-da4199fc485a" alt="The Herbalism panel docked to the world map" width="100%">
@@ -16,7 +16,7 @@ Tired of alt-tabbing to Wowhead? Forever Nodes puts WoW: Forever's gathering nod
     </td>
     <td align="center" valign="top" width="305">
       <img src="https://github.com/user-attachments/assets/85b2cdde-bf7d-4f43-836d-c24b1ef0a477" alt="The Forever Nodes button on the world map" width="288" height="240"><br>
-      <sub>Right on your world map, next to the quest log.</sub>
+      <sub>Right on your world map, and you can move it anywhere.</sub>
     </td>
     <td align="center" valign="top" width="260">
       <img src="https://github.com/user-attachments/assets/158dfd14-cf13-4997-9f9c-9a69a5f03a3a" alt="Minimap with node icons and nearby dots" width="243" height="240"><br>
@@ -34,64 +34,49 @@ Tired of alt-tabbing to Wowhead? Forever Nodes puts WoW: Forever's gathering nod
 
 <br>
 
-## Starting Out
+## Getting Started
 
-There's nothing to set up. Most known herb, ore and fishing pool locations come preloaded, your professions are detected automatically, and the addon adapts to your setup on its own - stock UI or EllesmereUI, your minimap's shape & size, and map addons that rescale the world map.
-
-**First launch:**
-
-1. Open your world map and click the **Forever Nodes** button, just above the quest log button.
-2. Pick a profession tab and tick the nodes you want to see.
-3. That's it - they appear on your minimap and world map.
-
-You can also type `/fn` to open it from anywhere.
+Open your world map and the quick tutorial will show you around. Type `/fn help` to see it again.
 
 <br>
 
 ## Features
 
-- **Built into your world map** - the panel sits right where the quest log does, so everything is in one place: your node toggles, your skill and trainers, and all settings (gear tab, top-right). It can also be used as a floating window instead.
-  - *Left-click* the map button - open the panel
-  - *Right-click* the map button - show or hide the map icons
-- **Know where you stand** - the panel keeps track of your profession, so you always know what to gather and when to train.
-  - *Skill bar* - your current rank at a glance. It glows when you're ready to train.
-  - *Rank lines* - the node list marks where your current rank tops out, so you can see what's worth gathering right now.
-  - *Trainer finder* - click the skill bar for the closest & cheapest trainers for your next rank (reputation discounts included). Click a trainer to drop a map pin on them.
-  - *Reminders* - a quick "Gz!" in chat when you cap a rank, and a gentle nudge if you forget to train.
-- **Required skill on tooltips** - hover a node to see the skill it needs, colored by difficulty from grey (easy) to red (too high).
-  - *Overworld* - herbs & veins in the world
-  - *Minimap* - the game's own tracking dots (experimental)
-  - *World map* - the addon's map icons (off by default)
-- **A clearer minimap up close** - once a node is within 190 yds (the game's own tracking range), its icon steps aside for a small marker, so the game's tracking dot stays easy to read.
-- **Grows as you play** - new spots you gather from are saved to your own copy. Recording is local only - nothing is ever sent anywhere.
+**Nodes on your maps**
 
-<br>
+- Herb, ore and fishing pool locations come preloaded
+- Shows on your minimap and world map
+- New spots you gather from are saved to your own copy
 
-## Quality of Life
+**Built into your world map**
 
-- **Smart visibility** - herbs & ore only show while you're tracking them, and fishing pools only while you're holding a pole (both optional).
-- **Per-character lists** - each character keeps its own ticked nodes, since alts are usually at different skill levels.
-- **Never in the way** - minimap icons don't block the game's own tooltips.
-- **Sorting** - by level or A-Z, with the nodes you can gather right now highlighted.
-- **Capped professions** - at 300, difficulty colors step aside since everything is easy by then (optional).
-- **Plan ahead** - browse professions you haven't learned yet (optional).
-- **Game options** - settings are also available under Options > AddOns > Forever Nodes.
+- *Left-click* the map button to open the panel
+- *Right-click* it to show or hide map icons
+- Dock the panel to your map or let it float
 
-<br>
+**Know when and where to train**
 
-## Customization
+- *Skill bar:* your rank at a glance, glowing when you're ready to train
+- *Rank lines:* see what's worth gathering at your current rank
+- *Trainer finder:* the closest and cheapest trainers, reputation discounts included
+- *Map pins:* click a trainer to pin them on your map
 
-- **Colors** - choose a color for each profession, used on the maps, the marker and the panel.
-- **Icons** - size, and round or square, set separately for the minimap and world map.
-- **Nearby marker** - build it from a dot, a circle and a border for each, all with their own color & size. A live preview shows exactly how it will look.
-- **Tooltips** - the overworld, minimap and world map tooltips each have their own settings, with a live preview:
-  - *Attach to* - the node's name, or the skill line (e.g. "[150] Herbalism")
-  - *Placement* - before or after
-  - *Style* - 150, (150), [150], or a separator (Name | 150)
-  - *Color* - the level, the level & brackets, the name, the whole line, or none
-  - *Text size* - for the world map tooltip
-- **Panel** - docked to the map or floating, each with its own scale.
-- **Minimap** - shape & icon edge can be fine-tuned in Advanced Minimap Settings, if auto-detection ever needs a hand.
+**Skill on tooltips**
+
+- See the skill each node needs, colored by difficulty
+- Works in the world, on the world map and on minimap tracking dots
+
+**Shows only what you need**
+
+- Herbs and ore appear while you're tracking them
+- Fishing pools appear while you're holding a pole
+- Each character keeps its own node list
+
+**Make it yours**
+
+- Matches the stock UI or EllesmereUI automatically, or pick your own theme
+- Adjust colors, icons, tooltips, scale and the nearby node marker
+- Move the map button anywhere on the map
 
 <br>
 

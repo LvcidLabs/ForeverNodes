@@ -83,7 +83,9 @@ FN.defaults = {
     circleEdgeColor = { 0, 0, 0, 0.63 },
     circleEdgeRadius = 7.5,
     circleEdgeWidth = 0.5,
-    showAll = true,  -- professions the character lacks can be opened (they are always listed, greyed)
+    tone = "auto",   -- the panel's colors: "auto" (follows the interface), "brown" or "dark"
+    mapButtonShown = true, -- the node panel's button on the world map
+    showAll = true,  -- nodes of professions the character lacks can be ticked and shown on the maps
     onlyTracked = true, -- herbs show only while Find Herbs is on, ore only while Find Minerals is on
     onlyPole = true,    -- fishing pools show only while a fishing pole is equipped
     cutoffs = true,     -- (Lvl sort) a faint line where each untrained rank ends
@@ -236,8 +238,24 @@ local function UpdateTracking()
     return changed
 end
 
+-- Which gathering professions this character has. True when that changed.
+local learned = {}
+local function UpdateLearned()
+    local changed = false
+    for _, kind in ipairs(FN.kinds) do
+        local has = FN:GetSkillInfo(kind) ~= nil
+        if has ~= learned[kind] then
+            learned[kind] = has
+            changed = true
+        end
+    end
+    return changed
+end
+
 -- Whether a ticked node type is shown right now.
 local function Showable(node)
+    -- Ticks for an unlearned profession are kept, but rest while the option is off.
+    if not db.showAll and not learned[node.kind] then return false end
     -- Pools have no tracking spell: they show while a pole is in hand.
     if node.kind == "fish" then return poleEquipped or not db.onlyPole end
     if db.onlyTracked and tracking[node.kind] == false then return false end
@@ -771,25 +789,27 @@ local function InitDB()
         db.markerParts = true
         db.tips = {} -- each tooltip then takes its own defaults (see FN:TipCfg)
     end
-    -- Fresh install: every herb and ore node is off until ticked; fishing pools
-    -- start on (they only show with a pole equipped anyway).
-    if type(db.enabled) ~= "table" then
-        db.enabled = {}
-        for _, node in ipairs(FN.nodes) do
-            if node.kind == "fish" then db.enabled[node.key] = true end
-        end
+    -- Once per account, new installs and players updating alike: the next world map opening
+    -- points out the panel button and offers the tutorial.
+    if not db.tutorialOffered then
+        db.tutorialOffered = true
+        db.spotlightDue = true
     end
+    db.enabled = nil -- the old account-wide starting list: new characters now start empty
 
-    -- Which nodes are ticked is kept per character (characters gather at different
-    -- skill levels); everything else stays account-wide. The account-wide list above
-    -- is only the starting point a character copies the first time it logs in.
+    -- Which nodes are ticked and whether the panel is open are kept per character;
+    -- everything else stays account-wide. A new character starts with nothing ticked
+    -- and the panel closed.
     ForeverNodesCharDB = ForeverNodesCharDB or {}
     local char = ForeverNodesCharDB
-    if type(char.enabled) ~= "table" then
-        char.enabled = {}
-        for key, on in pairs(db.enabled) do char.enabled[key] = on end
-    end
+    local isNew = type(char.enabled) ~= "table"
+    if isNew then char.enabled = {} end
     FN.enabled = char.enabled
+    if type(char.panel) ~= "table" then
+        -- A character from before this was per character carries on as the account was left.
+        local old = not isNew and type(db.panel) == "table" and db.panel.open
+        char.panel = { open = old and true or false }
+    end
 
     -- Herbs and ore were recorded under one setting before; each now has its own.
     if type(db.recordGather) == "boolean" then
@@ -948,6 +968,7 @@ driver:SetScript("OnEvent", function(self, event, arg1)
     elseif event == "PLAYER_LOGIN" then
         poleEquipped = CheckPole()
         UpdateTracking()
+        UpdateLearned()
         if FN.LoadRecorded then FN:LoadRecorded() end -- pools recorded in earlier sessions
         RebuildGrid()
         self:SetScript("OnUpdate", OnUpdate)
@@ -959,11 +980,15 @@ driver:SetScript("OnEvent", function(self, event, arg1)
             end
         end
         FN:SetupButtons()
-        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.3.1"
+        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.4.0"
         -- Gold name, white version, gold author; the hint goes on its own indented line.
         -- The yellow star is the game's own raid target marker, drawn at text height.
-        print(("|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t |cffffd100Forever Nodes|r |cffffffffv%s by Lvcid|r"
-            .. " |cffffffff(|r|cffffd100/fn|r|cffffffff to open)|r"):format(version))
+        -- The hint names the quickest way in that this player has on screen.
+        local button = db.mapButtonShown and "map button"
+            or (FN.MinimapButtonShown and FN:MinimapButtonShown() and "minimap button")
+        local also = button and ("|cffffffff or |r|cffffd100" .. button .. "|r") or ""
+        print(("|cffffd100<Forever Nodes>|r |cffffffffv%s by Lvcid|r"
+            .. " |cffffffff(|r|cffffd100/fn|r%s|cffffffff to open)|r"):format(version, also))
     elseif event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_EQUIPMENT_CHANGED" then
         local pole = CheckPole()
         if pole ~= poleEquipped then
@@ -975,7 +1000,9 @@ driver:SetScript("OnEvent", function(self, event, arg1)
         UpdateMinimap()
     elseif event == "SKILL_LINES_CHANGED" then
         if FN.RefreshOptions then FN:RefreshOptions() end
-        if UpdateTracking() and db.onlyTracked then FN:Refresh() end -- a tracking spell learned
+        local tracked = UpdateTracking() and db.onlyTracked -- a tracking spell learned
+        local profession = UpdateLearned() and not db.showAll -- its resting ticks wake up
+        if tracked or profession then FN:Refresh() end
     elseif event == "MINIMAP_UPDATE_TRACKING" then
         if UpdateTracking() and db.onlyTracked then FN:Refresh() end
     end
@@ -986,6 +1013,12 @@ SLASH_FOREVERNODES2 = "/fnodes"
 SLASH_FOREVERNODES3 = "/forevernodes"
 SlashCmdList.FOREVERNODES = function(text)
     text = text and text:lower() or ""
+    local command = text:match("^%s*(%a+)")
+    if command == "help" or command == "tutorial" or command == "dfl" then
+        db.spotlightDue = true
+        print("|cffffd100Forever Nodes:|r the quick guide shows the next time the world map opens")
+        return
+    end
     if text:match("^%s*checkpole") then
         PrintPoleInfo()
     elseif text:match("^%s*ttdebug") then

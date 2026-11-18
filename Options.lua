@@ -146,6 +146,35 @@ local function Outline(frame, region, r, g, b, a)
     return edges
 end
 
+-- The panel's colors. The window's frame, buttons and selection follow the interface; these
+-- follow the Theme setting and can be swapped live.
+local TONE = {
+    brown = { fill = { 0.20, 0.13, 0.07, 0.85 }, line = { 0.20, 0.13, 0.07, 0.85 }, tint = { 0.20, 0.13, 0.07, 0.25 },
+        edge = { 0.55, 0.42, 0.20, 0.55 }, swatch = { 0.44, 0.31, 0.17, 1 }, chip = { 0.16, 0.10, 0.05, 0.85 } },
+    dark = { fill = { 1, 1, 1, 0.07 }, line = { 1, 1, 1, 0.10 }, tint = { 1, 1, 1, 0.025 },
+        edge = { 1, 1, 1, 0.10 }, swatch = { 1, 1, 1, 0.34 }, chip = { 1, 1, 1, 0.08 } },
+}
+local toneFollowers = {}
+local function BrownTone()
+    local tone = FN.db.tone
+    if tone == "brown" then return true end
+    if tone == "dark" then return false end
+    return Stock()
+end
+-- Paints `texture` with one of the theme's colors, now and whenever the theme changes.
+local function ToneTexture(texture, part)
+    local function Paint()
+        local c = TONE[BrownTone() and "brown" or "dark"][part]
+        texture:SetColorTexture(c[1], c[2], c[3], c[4])
+    end
+    toneFollowers[#toneFollowers + 1] = Paint
+    Paint()
+    return texture
+end
+local function ToneLine(parent)
+    return ToneTexture(parent:CreateTexture(nil, "ARTWORK"), "line")
+end
+
 local function Label(parent, font, text)
     local fs = parent:CreateFontString(nil, "OVERLAY", font or "GameFontHighlightSmall")
     local skin = Skin()
@@ -156,14 +185,23 @@ end
 
 -- A dark see-through pane with a faint edge.
 local function Pane(parent)
-    if Stock() then
-        local inset = TryTemplate("Frame", nil, parent, "InsetFrameTemplate")
-        if inset then return inset end
+    local pane = Stock() and TryTemplate("Frame", nil, parent, "InsetFrameTemplate")
+    if not pane then
+        pane = CreateFrame("Frame", nil, parent)
+        local bg = Fill(pane, "BACKGROUND", 0, 0, 0, 0.30)
+        bg:SetAllPoints()
+        Outline(pane, pane, 1, 1, 1, 0.08)
     end
-    local pane = CreateFrame("Frame", nil, parent)
-    local bg = Fill(pane, "BACKGROUND", 0, 0, 0, 0.30)
-    bg:SetAllPoints()
-    Outline(pane, pane, 1, 1, 1, 0.08)
+    -- A wash over the pane when the theme differs from the interface's own colors.
+    local wash = pane:CreateTexture(nil, "BACKGROUND", nil, 7)
+    wash:SetAllPoints()
+    local function Paint()
+        local brown = BrownTone()
+        wash:SetShown(brown ~= Stock())
+        if brown then wash:SetColorTexture(0.20, 0.13, 0.07, 0.40) else wash:SetColorTexture(0, 0, 0, 0.45) end
+    end
+    toneFollowers[#toneFollowers + 1] = Paint
+    Paint()
     return pane
 end
 
@@ -415,7 +453,7 @@ local function IconTab(parent, icon, onClick)
         if isSelected then
             self.edge:SetVertexColor(1, 0.86, 0.25, 1)
             self.glow:SetVertexColor(1, 0.80, 0.20, 0.85)
-        elseif self.locked then -- cannot be opened: a dark, receding edge
+        elseif self.dimmed then -- not learned: a dark, receding edge
             self.edge:SetVertexColor(0, 0, 0, 0.9)
         else
             self.edge:SetVertexColor(0.30, 0.27, 0.22, 1)
@@ -427,12 +465,6 @@ local function IconTab(parent, icon, onClick)
         self:SetSelected(self.isSelected or false)
         self.pic:SetDesaturated(dimmed)
         self.pic:SetVertexColor(dimmed and 0.45 or 1, dimmed and 0.45 or 1, dimmed and 0.45 or 1)
-    end
-    -- A tab that cannot be clicked gets a darker edge than one that can.
-    function b:SetLocked(locked)
-        self.locked = locked
-        self:SetEnabled(not locked)
-        self:SetSelected(self.isSelected or false)
     end
     return b
 end
@@ -486,7 +518,6 @@ local function GearTab(parent, onClick)
         Paint()
     end
     function b:SetDimmed() end
-    function b:SetLocked() end
     b:SetSelected(false)
     return b
 end
@@ -939,7 +970,7 @@ local function Swatch(parent, text, getColor)
     chip:SetSize(26, 14)
     chip:SetPoint("LEFT")
     -- Edged like the settings' dividing lines, a little lighter: a color that can be clicked.
-    if Stock() then Outline(b, chip, 0.44, 0.31, 0.17, 1) else Outline(b, chip, 1, 1, 1, 0.34) end
+    for _, edge in ipairs(Outline(b, chip, 1, 1, 1, 1)) do ToneTexture(edge, "swatch") end
     local label = Label(b, nil, text)
     label:SetPoint("LEFT", chip, "RIGHT", 7, 0)
     b:SetSize(label:GetStringWidth() + 36, 20)
@@ -1099,12 +1130,12 @@ local function RefreshNodes()
     local page = nodesPage
     local db = FN.db
 
-    -- The profession picked in the left list. One this character lacks is only
-    -- opened while "Allow access to unlearned professions" is on.
+    -- The profession picked in the left list. One this character lacks can always be
+    -- opened; its nodes can only be ticked while "Allow tracking unlearned professions" is on.
     local skills = {}
     for _, kind in ipairs(FN.kinds) do skills[kind] = FN:GetSkillInfo(kind) end
     local current = page.kind
-    if current and not (skills[current] or db.showAll) then current = nil end
+    local canTick = current ~= nil and (skills[current] ~= nil or db.showAll)
 
     -- Docked to the map the window is narrow: the controls tighten up to stay on
     -- one row with the title, and the list is a single scrolling column.
@@ -1128,6 +1159,7 @@ local function RefreshNodes()
     page.scroll:SetPoint("BOTTOMRIGHT", LIST_BLEED, 0)
     page.scroll.rightBleed = LIST_BLEED
     page.fishNote:SetShown(current == "fish" and db.onlyPole)
+    page.fishLink:SetShown(current == "fish" and db.onlyPole)
 
     page.title:SetText(current and FN.kindNames[current] or "")
     page.sortToggle:SetMode(db.sort)
@@ -1138,12 +1170,12 @@ local function RefreshNodes()
     -- clicked by mistake (or to close the list): they rest, dimmed, until it closes.
     local resting = page.trainers and page.trainers.open and current ~= nil
     page.undo:SetShown(current ~= nil and page:CanUndo())
+    local rest = resting or (current ~= nil and not canTick)
     for _, b in ipairs({ page.all, page.none, page.undo }) do
-        if b.SetEnabled then b:SetEnabled(not resting) end
-        b:EnableMouse(not resting)
-        b:SetAlpha(resting and 0.35 or 1)
+        if b.SetEnabled then b:SetEnabled(not rest) end
+        b:EnableMouse(not rest)
+        b:SetAlpha(rest and 0.35 or 1)
     end
-    page.empty:SetShown(current == nil)
 
     -- The profession's own card art as the list box's background, exactly as the game's recipe
     -- pane uses it: one picture (brown, glow, dark edges and the illustration) filling the box
@@ -1158,7 +1190,7 @@ local function RefreshNodes()
             page.artShade = page.frame:CreateTexture(nil, "BACKGROUND", nil, 3)
             page.artShade:SetAllPoints(page.art)
         end
-        local stock = Stock()
+        local stock = BrownTone()
         page.art:SetDesaturated(not stock)
         page.artShade:SetColorTexture(0, 0, 0, stock and 0.175 or 0.4)
         local NAMES = { herb = "Herbalism", ore = "Mining", fish = "Fishing" }
@@ -1248,6 +1280,9 @@ local function RefreshNodes()
         row.icon:SetTexture(node.icon)
         row.name:SetText(node.name)
         row.mark:SetShown(FN.enabled[node.key] and true or false)
+        row:SetEnabled(canTick)
+        row.box:SetAlpha(canTick and 1 or 0.4)
+        row.mark:SetAlpha(canTick and 1 or 0.4)
         row.skill:SetText(node.skill > 0 and node.skill or "")
 
         -- Beyond the current rank, or a profession the character hasn't learned: greyed name,
@@ -1298,8 +1333,10 @@ local function RefreshNodes()
     note:SetParent(page.scroll.child)
     note:ClearAllPoints()
     note:SetPoint("TOP", page.scroll.child, "TOPLEFT", LIST_BLEED + pageWidth / 2, -perCol * ROW_HEIGHT - 16 - trainersH)
+    page.fishLink:ClearAllPoints()
+    page.fishLink:SetPoint("TOP", note, "BOTTOM", 0, -12)
     local listHeight = perCol * ROW_HEIGHT
-    if current == "fish" and db.onlyPole then listHeight = listHeight + 16 + math.ceil(note:GetStringHeight()) end
+    if current == "fish" and db.onlyPole then listHeight = listHeight + 16 + math.ceil(note:GetStringHeight()) + 12 + 14 end
 
     page.scroll.child:SetSize(pageWidth + LIST_BLEED, math.max(1, listHeight + trainersH))
     page.scroll:Update()
@@ -1740,19 +1777,23 @@ local function BuildHeader(page)
     end
 
     -- Hover: instant swap to the cue; after leaving it holds 1 s, fades out 0.5 s, then the
-    -- level is back at once. Re-entering before that keeps it.
+    -- level is back at once. Re-entering before that keeps it. After a click the cue stays away
+    -- while the mouse stays on the bar (the glow stays, so the skill can be watched going up);
+    -- leaving the bar and coming back brings it back.
+    local spent = false
     local leaveTimer
     bar:SetScript("OnEnter", function(self)
         self.hovered = true
         FadeTo(self.glow, 1, 0.2)
         if leaveTimer then leaveTimer:Cancel(); leaveTimer = nil end
-        if not notice then ShowCue(HoverText()) end
+        if not notice and not spent then ShowCue(HoverText()) end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         H:FillTooltip(GameTooltip)
         GameTooltip:Show()
     end)
     bar:SetScript("OnLeave", function(self)
         self.hovered = false
+        spent = false
         FadeTo(self.glow, 0, 0.6)
         GameTooltip:Hide()
         if notice then return end
@@ -1762,25 +1803,28 @@ local function BuildHeader(page)
         end)
     end)
 
+    -- The first launch tour shows the bar as if the mouse were on it.
+    function H:TourHover(on)
+        FadeTo(bar.glow, on and 1 or 0, 0.2)
+        if on then ShowCue("View trainers") else H:Reset() end
+    end
+
     -- Click: open or close the trainer list. Opening plays a locked notice, one text at a time:
     -- current text out 0.2 s, "Click again to hide" in 0.5 s, hold 1 s, out 0.5 s, then at once
-    -- "Hide trainers" if still hovered, otherwise the level. Clicking during it closes the list.
+    -- "Hide trainers" if the mouse left and came back during it, otherwise the level. Clicking
+    -- during it closes the list.
     bar:SetScript("OnClick", function(self)
         local T = page.trainers
         if not (T and kind) then return end
-        if notice then
+        if notice or T.open then
             T:Close(); H:Reset()
-            if self.hovered then ShowCue("View trainers") end
-            return
-        end
-        if T.open then
-            T:Close()
-            if self.hovered then ShowCue("View trainers") else ShowCue(nil, 0) end
+            spent = self.hovered
             return
         end
         T:Open()
         CancelAll()
         notice = true
+        spent = self.hovered
         FadeTo(bar.cue, 0, 0.2); FadeTo(bar.text, 0, 0.2)
         Later(0.2, function()
             bar.cueText:SetText("Click again to hide")
@@ -1789,7 +1833,7 @@ local function BuildHeader(page)
         Later(1.7, function() FadeTo(bar.cue, 0, 0.5) end)
         Later(2.2, function()
             notice = false
-            if self.hovered and T.open then ShowCue("Hide trainers") else bar.text:SetAlpha(1) end
+            if self.hovered and not spent and T.open then ShowCue("Hide trainers") else bar.text:SetAlpha(1) end
         end)
     end)
 
@@ -2068,13 +2112,17 @@ local function BuildTrainers(page)
     hide.bg:SetVertexColor(0, 0, 0, 0.6)
     hide.top = Fill(hide, "BORDER", 1, 1, 1, 0.1); hide.top:SetHeight(1)
     hide.top:SetPoint("TOPLEFT", 1, 0); hide.top:SetPoint("TOPRIGHT", -1, 0)
-    hide.fs = Label(hide, "GameFontDisableSmall", "Hide trainers"); hide.fs:SetPoint("CENTER", 0, 1)
-    hide.fs:SetTextColor(0.42, 0.42, 0.42)
+    -- The text and its lines sit on a frame above the dark background's, which would cover them.
+    hide.front = CreateFrame("Frame", nil, hide)
+    hide.front:SetAllPoints()
+    hide.front:SetFrameLevel(hide.clip:GetFrameLevel() + 1)
+    hide.fs = Label(hide.front, "GameFontDisableSmall", "Hide trainers"); hide.fs:SetPoint("CENTER", 0, 1)
+    hide.fs:SetTextColor(0.30, 0.30, 0.30)
     local function SideLine(flip)
-        local t = hide:CreateTexture(nil, "OVERLAY")
+        local t = hide.front:CreateTexture(nil, "OVERLAY")
         t:SetColorTexture(1, 1, 1, 1); t:SetSize(26, 1)
         if t.SetGradient and CreateColor then
-            local a, b = CreateColor(0.6, 0.6, 0.6, 0), CreateColor(0.6, 0.6, 0.6, 0.8)
+            local a, b = CreateColor(0.6, 0.6, 0.6, 0), CreateColor(0.6, 0.6, 0.6, 0.4)
             if flip then t:SetGradient("HORIZONTAL", b, a) else t:SetGradient("HORIZONTAL", a, b) end
         end
         return t
@@ -2083,10 +2131,10 @@ local function BuildTrainers(page)
     -- (The card's own edge closes the block off under this row.)
     hide.l:SetPoint("RIGHT", hide.fs, "LEFT", -12, 0); hide.r:SetPoint("LEFT", hide.fs, "RIGHT", 12, 0)
     hide:SetScript("OnEnter", function(self) self.fs:SetTextColor(GOLD[1], GOLD[2], GOLD[3]) end)
-    hide:SetScript("OnLeave", function(self) self.fs:SetTextColor(0.42, 0.42, 0.42) end)
+    hide:SetScript("OnLeave", function(self) self.fs:SetTextColor(0.30, 0.30, 0.30) end)
     hide:SetScript("OnClick", function() L:Close(); if page.header then page.header:Reset() end end)
 
-    L.folds, L.expanded = {}, {}
+    L.folds, L.collapsed = {}, {}
     function L:NewFold(i)
         local f = CreateFrame("Button", nil, child)
         f:SetHeight(TR_ROW)
@@ -2098,7 +2146,7 @@ local function BuildTrainers(page)
         f.fs = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall"); f.fs:SetPoint("LEFT", LIST_BLEED + 18, 0); Smaller(f.fs)
         f.fs:SetTextColor(0.7, 0.68, 0.64)
         f:SetScript("OnClick", function(self)
-            L.expanded[self.group] = not L.expanded[self.group] or nil
+            L.collapsed[self.group] = not L.collapsed[self.group] or nil
             RefreshNodes()
         end)
         L.folds[i] = f
@@ -2349,7 +2397,7 @@ local function BuildTrainers(page)
         head.sort:SetRight(trainerSort.by == "price")
         local pinned = FN:PinnedTrainer()
         -- Distance sort: trainers on other continents fold away under one line per continent
-        -- ("Kalimdor · 5 trainers"), closed by default, so the list starts with what's reachable.
+        -- ("Kalimdor · 5 trainers"), open by default, and each can be folded away.
         local fold = trainerSort.by == "dist" and trainerSort.dir == 1
         local n, nf, zebra = 0, 0, false
         local lastGroup
@@ -2362,7 +2410,7 @@ local function BuildTrainers(page)
                 for _, o in ipairs(list) do if o.yards == nil and o.continent == group then count = count + 1 end end
                 f.group = group
                 f:ClearAllPoints(); f:SetPoint("TOPLEFT", child, "TOPLEFT", LIST_BLEED, -y); f:SetWidth(width + LIST_BLEED)
-                local open = L.expanded[group]
+                local open = not L.collapsed[group]
                 f.fs:SetText(group .. "  |cff6f6d68\194\183  " .. count .. (count == 1 and " trainer" or " trainers") .. "|r")
                 f.arrow:SetText(open and "\226\128\147" or "+")
                 f:Show()
@@ -2370,7 +2418,7 @@ local function BuildTrainers(page)
                 zebra = false
             end
             lastGroup = group
-            if not (fold and t.yards == nil and not L.expanded[group]) then
+            if not (fold and t.yards == nil and L.collapsed[group]) then
                 n = n + 1
                 local r = Row(n)
                 r.t = t
@@ -2505,8 +2553,6 @@ local function BuildNodesPage(page)
     nodesPage.scroll = Scroller(page)
     nodesPage.scroll.fadeTop = 16
 
-    nodesPage.empty = Label(page, "GameFontDisable",
-        "This character has no gathering profession.\n\nTurn on \"Allow access to unlearned professions\" under Settings > Professions to see every node.")
     nodesPage.fishNote = Label(page, "GameFontDisableSmall",
         "")
     -- "equipped" is green while a pole is in hand, red otherwise: a quick check that the addon sees it.
@@ -2518,8 +2564,39 @@ local function BuildNodesPage(page)
     FN:UpdatePoleNote()
     -- placed under the list each time the list is drawn
     nodesPage.fishNote:SetJustifyH("CENTER")
-    nodesPage.empty:SetPoint("TOPLEFT", 10, -120)
-    nodesPage.empty:SetPoint("TOPRIGHT", -10, -120)
+    -- Under the note: a shortcut to the setting it is about.
+    do
+        local link = CreateFrame("Frame", nil, nodesPage.scroll.child)
+        link:SetHeight(14)
+        -- One line of text, so its spacing is the font's own; the button lies over the two words.
+        local WORDS = "Settings > Professions"
+        local line = Label(link, "GameFontDisableSmall")
+        line:SetPoint("CENTER")
+        line:SetTextColor(0.33, 0.33, 0.33)
+        local function Paint(lit)
+            line:SetText("(" .. (lit and ("|cffffd100" .. WORDS .. "|r") or WORDS) .. " to change this)")
+        end
+        Paint(false)
+        local measure = Label(link, "GameFontDisableSmall")
+        measure:SetAlpha(0)
+        local go = CreateFrame("Button", nil, link)
+        local function Fit()
+            link:SetWidth(line:GetStringWidth())
+            measure:SetText("(")
+            local x = measure:GetStringWidth()
+            measure:SetText(WORDS)
+            go:ClearAllPoints()
+            go:SetPoint("LEFT", line, "LEFT", x, 0)
+            go:SetSize(measure:GetStringWidth(), 14)
+        end
+        Fit()
+        link:SetScript("OnShow", Fit) -- the font may only be ready once it is on screen
+        go:SetScript("OnEnter", function() Paint(true) end)
+        go:SetScript("OnLeave", function() Paint(false) end)
+        go:SetScript("OnClick", function() FN:ShowProfessionSettings() end)
+        KeepChatFocus(go)
+        nodesPage.fishLink = link
+    end
 
     BuildHeader(nodesPage)
     BuildTrainers(nodesPage)
@@ -2560,8 +2637,7 @@ local function Section(column, key, title, height, onToggle)
     if stock then
         -- The quest log's brown bar with a thin gold edge, and its plain bright-yellow
         -- + / - (not a round button), as on the quest log's zone headers.
-        fill:SetColorTexture(0.20, 0.13, 0.07, 0.85)
-        Outline(header, header, 0.55, 0.42, 0.20, 0.55)
+        for _, edge in ipairs(Outline(header, header, 1, 1, 1, 1)) do ToneTexture(edge, "edge") end
         text:SetTextColor(0.85, 0.82, 0.75)
         -- Hover as on the quest log: the title turns bright white, the bar stays as it is.
         hover:SetAlpha(0)
@@ -2581,11 +2657,12 @@ local function Section(column, key, title, height, onToggle)
         section.upright = Bar(3, 11)
         sign = header:CreateFontString(nil, "OVERLAY") -- unused in this look; kept so Paint stays simple
     else
-        fill:SetColorTexture(1, 1, 1, 0.07)
         sign = Label(header, "GameFontNormalLarge")
         sign:SetPoint("RIGHT", -9, 0)
         sign:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
     end
+
+    ToneTexture(fill, "fill")
 
     local content = CreateFrame("Frame", nil, column)
     content:SetSize(SECTION_WIDTH - 2 * SECTION_INSET, height)
@@ -2600,15 +2677,11 @@ local function Section(column, key, title, height, onToggle)
     local box = CreateFrame("Frame", nil, column)
     box:SetPoint("TOPLEFT", header, "BOTTOMLEFT")
     box:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT")
-    local edges
-    if stock then
-        edges = Outline(box, box, 0.20, 0.13, 0.07, 0.85)
-    else
-        edges = Outline(box, box, 1, 1, 1, 0.10)
-    end
+    local edges = Outline(box, box, 1, 1, 1, 1)
+    for _, edge in ipairs(edges) do ToneTexture(edge, "line") end
     edges[1]:Hide() -- the header is the top edge
     -- A very faint tint inside, so the open section reads as one block.
-    local tint = stock and Fill(box, "BACKGROUND", 0.20, 0.13, 0.07, 0.25) or Fill(box, "BACKGROUND", 1, 1, 1, 0.025)
+    local tint = ToneTexture(box:CreateTexture(nil, "BACKGROUND"), "tint")
     tint:SetAllPoints()
     section.box = box
 
@@ -2702,6 +2775,15 @@ local function BuildSettingsPage(columnA, columnB)
         end
         Relayout(true)
     end
+    -- Opens one section from elsewhere in the panel.
+    function FN:OpenSettingsSection(key)
+        for _, list in ipairs({ sectionsA, sectionsB }) do
+            for _, section in ipairs(list) do
+                db.collapsed[section.key] = section.key ~= key or nil
+            end
+        end
+        Relayout(true)
+    end
     local function Add(list, column, key, title, height)
         local section = Section(column, key, title, height, Toggled)
         list[#list + 1] = section
@@ -2760,7 +2842,7 @@ local function BuildSettingsPage(columnA, columnB)
     local edge = Slider(page, "Draw range", 50, 125, 1, "%d%%", Number("minimapEdge"))
     -- The minimap-only part: a line across the section in its border's color, and under it
     -- "Advanced", which opens and closes the controls below it (closed by default).
-    local miniLine = Stock() and Fill(page, "ARTWORK", 0.20, 0.13, 0.07, 0.85) or Fill(page, "ARTWORK", 1, 1, 1, 0.10)
+    local miniLine = ToneLine(page)
     miniLine:SetHeight(1)
     local advanced = CreateFrame("Button", nil, page)
     advanced:SetSize(220, 20) -- the clickable area covers the whole label
@@ -2846,7 +2928,7 @@ local function BuildSettingsPage(columnA, columnB)
     local profSection
     profSection, page = Add(sectionsA, columnA, "colors", "Professions", 124)
     local profPage = page
-    local note = Label(page, "GameFontDisableSmall", "Used on the maps, the nearby marker and the panel.")
+    local note = Label(page, "GameFontNormal", "Colors")
     note:SetPoint("TOPLEFT", 0, 0)
     Swatch(page, "Herbs", function() return db.colors.herb end):SetPoint("TOPLEFT", 0, -20)
     Swatch(page, "Mining", function() return db.colors.ore end):SetPoint("TOPLEFT", 78, -20)
@@ -2876,10 +2958,14 @@ local function BuildSettingsPage(columnA, columnB)
             RefreshNodes()
         end)
     pole:SetPoint("TOPLEFT", 0, -74)
-    -- Professions the character lacks can be opened too (they are always listed, greyed).
-    Check(page, "Allow access to unlearned professions",
+    -- Nodes of professions the character lacks can be ticked and shown on the maps.
+    Check(page, "Allow tracking unlearned professions",
         function() return db.showAll end,
-        function(v) db.showAll = v and true or false; FN:RefreshOptions() end):SetPoint("TOPLEFT", 0, -98)
+        function(v)
+            db.showAll = v and true or false
+            FN:Refresh()
+            FN:RefreshOptions()
+        end):SetPoint("TOPLEFT", 0, -98)
     local function PaintProf()
         tracked:SetLabel(DIM .. "(|r|cff" .. Hex("herb") .. "Herbs|r" .. DIM .. "/|r|cff" .. Hex("ore") .. "Ore|r" .. DIM .. ")|r Only while tracking")
         pole:SetLabel(DIM .. "(|r|cff" .. Hex("fish") .. "Fish pools|r" .. DIM .. ")|r Only while pole equipped")
@@ -2888,7 +2974,7 @@ local function BuildSettingsPage(columnA, columnB)
     recordLabels[#recordLabels + 1] = PaintProf
 
     -- "Appearance & Behavior": a fold like Advanced Minimap Settings (closed each time).
-    local profLine = Stock() and Fill(page, "ARTWORK", 0.20, 0.13, 0.07, 0.85) or Fill(page, "ARTWORK", 1, 1, 1, 0.10)
+    local profLine = ToneLine(page)
     profLine:SetHeight(1)
     local fold = CreateFrame("Button", nil, page)
     fold:SetSize(220, 20)
@@ -2922,10 +3008,13 @@ local function BuildSettingsPage(columnA, columnB)
         Check(page, DIM .. "(A-Z sort)|r Show nodes beyond my profession tier",
             function() return db.azShowBeyond end,
             function(v) db.azShowBeyond = v and true or false; RefreshNodes() end),
-        Check(page, DIM .. "(|r|cffffd100Skill 300|r" .. DIM .. ")|r Mute " .. Gradient("difficulty coloring") .. " " .. DIM .. "(doesn't affect tooltips)|r",
+        Check(page, DIM .. "(|r|cffffd100Skill 300|r" .. DIM .. ")|r Mute " .. Gradient("difficulty coloring"),
             function() return db.muteAtMax end,
             function(v) db.muteAtMax = v and true or false; RefreshNodes() end),
     }
+    -- Its own line under the Skill 300 option, which has no room for it beside the label.
+    local muteHint = Label(page, "GameFontDisableSmall", "(doesn't affect tooltips)")
+    muteHint:SetTextColor(0.42, 0.42, 0.42)
 
     local function LayoutProf()
         local y = 124
@@ -2940,9 +3029,15 @@ local function BuildSettingsPage(columnA, columnB)
             if foldOpen then
                 c:ClearAllPoints()
                 c:SetPoint("TOPLEFT", 0, -y)
+                if c == foldChecks[3] then
+                    muteHint:ClearAllPoints()
+                    muteHint:SetPoint("TOPLEFT", Stock() and 29 or 21, -(y + 21))
+                    y = y + 17
+                end
                 y = y + 24
             end
         end
+        muteHint:SetShown(foldOpen)
         profSection.height = y - 6
     end
     fold:SetScript("OnClick", function()
@@ -3025,7 +3120,7 @@ local function BuildSettingsPage(columnA, columnB)
     lineFrame:SetAllPoints(page)
     lineFrame:SetFrameLevel(page:GetFrameLevel() + 8)
     local function GatherLine(y)
-        local t = Stock() and Fill(lineFrame, "ARTWORK", 0.20, 0.13, 0.07, 0.85) or Fill(lineFrame, "ARTWORK", 1, 1, 1, 0.10)
+        local t = ToneLine(lineFrame)
         t:SetHeight(1)
         function t:At(at)
             self:ClearAllPoints()
@@ -3317,7 +3412,7 @@ local function BuildSettingsPage(columnA, columnB)
         FN:Restyle()
     end
     local function Line()
-        local t = Stock() and Fill(nearbyPage, "ARTWORK", 0.20, 0.13, 0.07, 0.85) or Fill(nearbyPage, "ARTWORK", 1, 1, 1, 0.10)
+        local t = ToneLine(nearbyPage)
         t:SetHeight(1)
         return t
     end
@@ -3438,7 +3533,7 @@ local function BuildSettingsPage(columnA, columnB)
             stripes[kind] = t
         end
         -- Edged like the dividing lines, darker than a clickable swatch's: this one is locked.
-        local chipEdge = Stock() and Fill(chip, "BACKGROUND", 0.16, 0.10, 0.05, 0.85) or Fill(chip, "BACKGROUND", 1, 1, 1, 0.08)
+        local chipEdge = ToneTexture(chip:CreateTexture(nil, "BACKGROUND"), "chip")
         chipEdge:SetPoint("TOPLEFT", -1, 1)
         chipEdge:SetPoint("BOTTOMRIGHT", 1, -1)
         local row = { label = LabelFor("Color"), frame = button, kind = "menu", chipped = true }
@@ -3670,36 +3765,109 @@ local function BuildSettingsPage(columnA, columnB)
         for i = 1, #recordLabels do recordLabels[i]() end
     end
 
-    -- Window -------------------------------------------------------------------
-    _, page = Add(sectionsB, columnB, "window", "Window", 88)
+    -- Advanced -----------------------------------------------------------------
+    _, page = Add(sectionsB, columnB, "window", "Advanced", 368)
+    -- A gold title; all but the first have a dividing line above them.
+    local function GroupTitle(text, y, ruled)
+        if ruled then
+            local rule = ToneLine(page)
+            rule:SetHeight(1)
+            rule:SetPoint("TOPLEFT", 0, y + 8)
+            rule:SetPoint("TOPRIGHT", 0, y + 8)
+        end
+        local title = Label(page, "GameFontNormal", text)
+        title:SetPoint("TOPLEFT", 0, y)
+        return title
+    end
+
+    GroupTitle("UI", 0)
+    local dockBox = Check(page, "Panel docked to world map", Bool("dock", function()
+        FN:DockSettingChanged()
+    end))
+    dockBox:SetPoint("TOPLEFT", 0, -22)
+    local dockHint = Label(page, "GameFontDisableSmall", "(Uncheck for floating panel)")
+    dockHint:SetTextColor(0.42, 0.42, 0.42)
+    dockHint:SetPoint("TOPLEFT", Stock() and 29 or 21, -43) -- under the tick box's label
+
+    GroupTitle("Theme", -74, true)
+    local TONES = { "auto", "brown", "dark" }
+    local theme
+    theme = MultiToggle(page, { "Auto", "Brown", "Dark" }, function(i)
+        db.tone = TONES[i]
+        theme:SetPick(i)
+        for n = 1, #toneFollowers do toneFollowers[n]() end
+        FN:RefreshOptions()
+    end)
+    theme:SetPoint("TOP", 0, -94)
+    syncers[#syncers + 1] = function()
+        for i, tone in ipairs(TONES) do
+            if db.tone == tone then theme:SetPick(i) end
+        end
+    end
+
     -- The floating window and the docked panel each keep their own scale (scale and
-    -- dockScale), so a size chosen for one never carries into the other.
-    local function ScaleKey() return (frame and frame.docked) and "dockScale" or "scale" end
-    local scale = Slider(page, "Scale", 0.7, 1.5, 0.05, "%.2fx",
-        function() return db[ScaleKey()] end,
-        function(v)
-            db[ScaleKey()] = v
-            frame:SetScale(v)
-            FN:UpdateDock()
-        end, true)
-    scale:SetPoint("TOPLEFT", 0, -54) -- last, under the two tick boxes
-    -- Docked, scaling the panel's contents can spill them past the panel: flagged there
-    -- with a small red tag beside the label, on the same baseline.
-    local experimental = Label(scale, "GameFontNormalSmall", "EXPERIMENTAL")
+    -- dockScale), so a size chosen for one never carries into the other. Both show; only the
+    -- one in use can be changed. Scaling the docked panel's contents can spill them past it.
+    local scaleTitle = GroupTitle("Scale", -134, true)
+    local experimental = Label(page, "GameFontNormalSmall", "EXPERIMENTAL")
     experimental:SetTextColor(1, 0.25, 0.25)
     local font, size, flags = experimental:GetFont()
     if font and size then experimental:SetFont(font, math.max(size - 2, 8), flags) end -- a step smaller than the label
-    experimental:SetPoint("BOTTOMLEFT", scale.label, "BOTTOMRIGHT", 6, 0)
-    sectionWidthFollowers[#sectionWidthFollowers + 1] = function()
-        experimental:SetShown(frame and frame.docked or false)
-        scale.Sync() -- the value of the mode now showing
+    experimental:SetPoint("BOTTOMLEFT", scaleTitle, "BOTTOMRIGHT", 6, 0)
+    local function ScaleSlider(text, key, y)
+        local holder = Slider(page, text, 0.7, 1.5, 0.05, "%.2fx",
+            function() return db[key] end,
+            function(v)
+                db[key] = v
+                frame:SetScale(v)
+                FN:UpdateDock()
+            end, true)
+        holder:SetPoint("TOPLEFT", 0, y)
+        return holder
     end
-    Check(page, "Dock to the world map (map button)", Bool("dock", function()
-        FN:DockSettingChanged()
-    end)):SetPoint("TOPLEFT", 0, -24)
+    local dockedScale = ScaleSlider("Docked Panel", "dockScale", -156)
+    local floatingScale = ScaleSlider("Floating Panel", "scale", -196)
+    local function ScaleInUse()
+        local docked = frame and frame.docked or false
+        for holder, active in pairs({ [dockedScale] = docked, [floatingScale] = not docked }) do
+            holder.slider:EnableMouse(active)
+            holder:SetAlpha(active and 1 or 0.4)
+            holder.Sync()
+        end
+    end
+    sectionWidthFollowers[#sectionWidthFollowers + 1] = ScaleInUse
+    syncers[#syncers + 1] = ScaleInUse
+    local resetScale = Card(page, "Reset scaling", 110, 22, function()
+        db.dockScale, db.scale = FN.defaults.dockScale, FN.defaults.scale
+        frame:SetScale(frame.docked and db.dockScale or db.scale)
+        FN:UpdateDock()
+        ResyncAll()
+    end)
+    resetScale:SetPoint("TOP", 0, -238)
+
+    GroupTitle("Addon Buttons", -278, true)
     Check(page, "Show the minimap button",
         function() return FN:MinimapButtonShown() end,
-        function(v) FN:SetMinimapButtonShown(v and true or false) end):SetPoint("TOPLEFT", 0, 0)
+        function(v) FN:SetMinimapButtonShown(v and true or false) end):SetPoint("TOPLEFT", 0, -300)
+    Check(page, "Show the world map button",
+        function() return FN:MapButtonShown() end,
+        function(v) FN:SetMapButtonShown(v and true or false) end):SetPoint("TOPLEFT", 0, -324)
+    -- Unlocked, the button can be dragged around the map; closing the map locks it again.
+    local lockButton = Check(page, "Lock the world map button",
+        function() return FN:MapButtonLocked() end,
+        function(v) FN:SetMapButtonLocked(v and true or false) end)
+    lockButton:SetPoint("TOPLEFT", 0, -348)
+    -- Back to its place above the quest log's arrow; rests until the button has been moved.
+    local resetButton = Card(page, "Reset position", 104, 22, function() FN:ResetMapButton() end)
+    resetButton:SetPoint("TOPRIGHT", 0, -347)
+    syncers[#syncers + 1] = function()
+        local shown = FN:MapButtonShown()
+        lockButton:SetEnabled(shown)
+        lockButton:SetAlpha(shown and 1 or 0.4)
+        local moved = FN:MapButtonMoved()
+        resetButton:SetEnabled(moved)
+        resetButton:SetAlpha(moved and 1 or 0.4)
+    end
 
     -- Last of all on every sync: stack the sections at their current sizes.
     syncers[#syncers + 1] = function() Relayout(false) end
@@ -3838,14 +4006,10 @@ local peeking = false   -- the quest log is up where the node panel usually is (
 local GetCV = (C_CVar and C_CVar.GetCVar) or GetCVar
 local SetCV = (C_CVar and C_CVar.SetCVar) or SetCVar
 
--- Kept in the saved settings, so it survives closing the map and reloading:
+-- Kept per character, so it survives closing the map and reloading:
 --   open         the node panel is the map's side panel
--- (Older versions also kept questBefore / nodesBefore to swap the two panels
--- back; that was dropped, and ClosePanel clears any left in saved settings.)
 local function State()
-    local db = FN.db
-    if type(db.panel) ~= "table" then db.panel = {} end
-    return db.panel
+    return ForeverNodesCharDB.panel
 end
 
 local function QuestLogShown()
@@ -4384,22 +4548,19 @@ local function ApplyLayout()
     end)
     order[#order + 1] = SETTINGS
 
-    local firstUsable
+    local firstProfession
     for i, key in ipairs(order) do
         local row, tab = navRows[key], navTabs[key]
         if key ~= SETTINGS then
             local known = skills[key] ~= nil
-            local usable = known or FN.db.showAll
             local icon = ProfessionIcon(key)
             row.pic:SetTexture(icon)
             row.tag:SetText(known and skills[key] or "")
             row:SetDimmed(not known)
-            row:SetEnabled(usable)
             tab.pic:SetTexture(icon)
             tab.level:SetText(known and skills[key] or "")
             tab:SetDimmed(not known)
-            tab:SetLocked(not usable)
-            if usable and not firstUsable then firstUsable = key end
+            firstProfession = firstProfession or key
         end
         -- Side panel: icon tabs in one row, Settings at the far right. Window: a list down the left.
         row:SetShown(not narrow)
@@ -4423,10 +4584,7 @@ local function ApplyLayout()
     navSeparator:SetPoint("TOPLEFT", 10, -6 - (#order - 1) * 32 - 6)
     navSeparator:SetPoint("TOPRIGHT", -10, -6 - (#order - 1) * 32 - 6)
 
-    -- Keep the selection on something that can be opened.
-    if not selected or (selected ~= SETTINGS and not (skills[selected] or FN.db.showAll)) then
-        selected = firstUsable or SETTINGS
-    end
+    if not selected then selected = firstProfession or SETTINGS end
     ShowPage(selected)
 
     -- Settings: two blocks side by side, or stacked (and scrolling) in the side panel.
@@ -4615,7 +4773,6 @@ local function ClosePanel(why)
     local state = State()
     if why ~= "peek" then state.open = false end
     peeking = (why == "peek" and state.open) and true or false
-    state.questBefore, state.nodesBefore = nil, nil
     frame:Hide()
     if covering then
         Cover(false)
@@ -4911,6 +5068,14 @@ function FN:OpenToSettings()
     if frame and frame:IsShown() then ShowPage(SETTINGS) end
 end
 
+-- The fishing list's shortcut: Settings, with the Professions section open.
+function FN:ShowProfessionSettings()
+    ShowPage(SETTINGS)
+    FN:OpenSettingsSection("colors")
+    settingsScroll:SetVerticalScroll(0)
+    settingsScroll:Update()
+end
+
 -- The world map button: the side panel, swapping places with the quest log.
 function FN:ToggleMapPanel()
     if not FN.db.dock or MapIsFullScreen() then -- docking is off, or there is no side to attach to
@@ -4922,4 +5087,129 @@ function FN:ToggleMapPanel()
         return
     end
     OpenPanel()
+end
+
+-- The first launch tour (Buttons.lua draws it; these set the panel up for each step) -------------
+
+local touring, tourPanel, tourSaved = false, false, nil
+
+-- The tour needs the docked panel, which cannot be opened full screen or (often) in combat.
+function FN:TourAvailable()
+    return FN.db.dock and not MapIsFullScreen() and not InCombatLockdown()
+end
+
+-- The first gathering profession the character has, for the tour only.
+local function TourProfession()
+    for _, kind in ipairs({ "herb", "ore" }) do
+        if FN:GetSkillInfo(kind) then return kind end
+    end
+    return FN.kindNames.herb and "herb" or FN.kinds[1]
+end
+
+-- The nearest trainer's row in the open trainer list.
+local function TourTrainer()
+    for _, row in ipairs(nodesPage.trainers.rows) do
+        if row:IsShown() and row.t then return row end
+    end
+    return nil
+end
+
+-- Returns false when the step has nothing to show.
+function FN:TourPrepare(step)
+    if not touring then
+        touring = true
+        tourSaved = { page = selected, sort = FN.db.sort }
+    end
+    local page = step == 6 and SETTINGS or TourProfession()
+    selected = page
+    if not (frame and frame:IsShown() and frame.docked) then OpenPanel() end
+    tourPanel = true
+    if not frame then return true end
+    ShowPage(page)
+    -- The sort step's gold highlight should be the only one in the tab row.
+    if step == 5 then navTabs[page]:SetSelected(false) end
+    local trainers, header = nodesPage.trainers, nodesPage.header
+    if header and page ~= SETTINGS then header:TourHover(step == 3) end
+    if step == 4 then
+        if not trainers.open then trainers:Open() end
+        local row = TourTrainer()
+        if row then row.pin:Show() end -- only the picture: no pin is placed
+        return row ~= nil
+    end
+    if trainers.open then trainers:Close() end
+    return true
+end
+
+-- The sort switch can be tried as much as the player likes; it is put back afterwards.
+function FN:TourSort()
+    nodesPage.sortToggle:Click()
+    navTabs[selected]:SetSelected(false)
+end
+
+local function ScreenRect(region, pad)
+    local left, top = region:GetLeft(), region:GetTop()
+    if not (left and top) then return nil end
+    local scale = region:GetEffectiveScale()
+    pad = pad or 0
+    return { l = left * scale - pad, r = region:GetRight() * scale + pad,
+        t = top * scale + pad, b = region:GetBottom() * scale - pad }
+end
+
+-- What stays lit in a step, in screen pixels.
+function FN:TourRects(step)
+    if not (frame and frame:IsShown()) then return nil end
+    local rect, circle
+    if step == 1 then
+        -- The profession tabs.
+        for _, kind in ipairs(FN.kinds) do
+            local tab = ScreenRect(navTabs[kind], 3)
+            if tab and rect then
+                rect.l, rect.r = math.min(rect.l, tab.l), math.max(rect.r, tab.r)
+                rect.t, rect.b = math.max(rect.t, tab.t), math.min(rect.b, tab.b)
+            elseif tab then
+                rect = tab
+            end
+        end
+    elseif step == 2 then
+        -- The node rows, however many there are.
+        rect = ScreenRect(nodesPage.scroll)
+        local first, last = nodesPage.rows[1], nodesPage.rows[#(nodesPage.list or {})]
+        local top, bottom = first and ScreenRect(first), last and ScreenRect(last)
+        if rect and top and bottom then
+            rect.t = top.t + 2
+            rect.b = math.max(rect.b, bottom.b - 2)
+        end
+    elseif step == 3 then
+        rect = ScreenRect(nodesPage.header.bar, 3)
+    elseif step == 4 then
+        local row = TourTrainer()
+        rect = row and ScreenRect(row, 2)
+    elseif step == 5 then
+        rect = ScreenRect(nodesPage.sortToggle, 4)
+    else
+        circle = navTabs[SETTINGS]
+    end
+    local lit = circle and ScreenRect(circle) or rect
+    local panel = ScreenRect(frame)
+    if not (lit and panel) then return nil end
+    return { rects = { rect }, circle = circle, click = step >= 3 and step <= 5, left = panel.l,
+        y = (lit.t + lit.b) / 2 }
+end
+
+-- Over, or the map was closed part way: the panel closes and everything is as it was.
+function FN:TourFinish()
+    if not touring then return end
+    touring = false
+    local saved = tourSaved
+    tourSaved = nil
+    if nodesPage.trainers and nodesPage.trainers.open then nodesPage.trainers:Close() end
+    if nodesPage.header then nodesPage.header:TourHover(false) end
+    FN.db.sort = saved.sort
+    if tourPanel then
+        tourPanel = false
+        if WorldMapFrame:IsShown() and frame and frame:IsShown() then ClosePanel("x") else State().open = false end
+    end
+    if frame and frame:IsShown() then ShowPage(saved.page or selected) else selected = saved.page end
+    if frame then RefreshNodes() end
+    if FN.RefreshOptions then FN:RefreshOptions() end
 end
