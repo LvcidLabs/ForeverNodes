@@ -980,7 +980,7 @@ driver:SetScript("OnEvent", function(self, event, arg1)
             end
         end
         FN:SetupButtons()
-        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.4.0"
+        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.4.1"
         -- Gold name, white version, gold author; the hint goes on its own indented line.
         -- The yellow star is the game's own raid target marker, drawn at text height.
         -- The hint names the quickest way in that this player has on screen.

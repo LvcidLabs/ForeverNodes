@@ -98,11 +98,18 @@ function FN.ShowTipLeftOf(owner, text, sub, subWidest, subAtlas)
     tip.plate:SetPoint("BOTTOMRIGHT", sub and -1 or 0, sub and 1 or 0)
     tip:ClearAllPoints()
     tip:SetPoint("RIGHT", owner, "LEFT", -3, 0)
+    tip.owner = owner
     tip:Show()
 end
 
 function FN.HideTip()
     if tip then tip:Hide() end
+end
+
+-- Hides the label only if it is this frame's own (the quest log's two arrow buttons swap places
+-- as the panel opens or closes, and must not take the map button's label with them).
+local function HideOwnTip(owner)
+    if tip and tip.owner == owner then tip:Hide() end
 end
 
 -- World map button -----------------------------------------------------------------
@@ -113,7 +120,19 @@ local function SetupWorldMapButton()
     if not map then return end
     local viewport = map.ScrollContainer or map
 
-    local unlocked = false -- the button is being placed: it can be dragged and does nothing else
+    local dragging = false -- the button is being dragged to a new place
+    local dragEnd          -- when the last drag ended (the mouse let go over the button is not a click)
+
+    -- OpenMap keeps its own buttons above the quest log's arrow (where ours goes by default), and
+    -- asks a new install to choose its map style the first time the map opens.
+    local function OpenMapOn()
+        local loaded = C_AddOns and C_AddOns.IsAddOnLoaded or IsAddOnLoaded
+        return loaded and loaded("OpenMap") or false
+    end
+    local function OpenMapAsking()
+        local settings = OpenMapOn() and type(OpenMapDB) == "table" and OpenMapDB.worldmap
+        return type(settings) == "table" and settings.enabled ~= false and settings.presetAsked == false
+    end
     local btn = CreateFrame("Button", "ForeverNodesWorldMapButton", map)
     btn:SetSize(26, 26)
     btn:SetFrameLevel(math.min(map:GetFrameLevel() + 2000, 9900))
@@ -140,7 +159,7 @@ local function SetupWorldMapButton()
         end
     end
     local function ShowTip(self)
-        if unlocked then return end
+        if dragging then return end
         local line = (mouseAtlas and "" or "RMB: ") .. "Map icons <%s>"
         FN.ShowTipLeftOf(self, TITLE,
             line:format(FN.db.worldmap and "|cff33ff33ON|r" or "|cffff4040OFF|r"),
@@ -149,12 +168,16 @@ local function SetupWorldMapButton()
     end
     btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     btn:SetScript("OnClick", function(self, button)
-        if unlocked then return end
+        if dragging or (dragEnd and GetTime() - dragEnd < 0.3) then return end
         if button == "RightButton" then
             FN:ToggleWorldMapIcons()
             ShowTip(self) -- same tooltip, new state
         else
             FN:ToggleMapPanel()
+            -- The map lays itself out again as the panel comes or goes: the label back once it has.
+            C_Timer.After(0, function()
+                if self:IsVisible() and self:IsMouseOver() and not dragging then ShowTip(self) end
+            end)
         end
     end)
     btn:SetScript("OnEnter", ShowTip)
@@ -174,8 +197,8 @@ local function SetupWorldMapButton()
                 button:HookScript("OnEnter", function(self)
                     FN.ShowTipLeftOf(self, "Quest Log")
                 end)
-                button:HookScript("OnLeave", FN.HideTip)
-                button:HookScript("OnHide", FN.HideTip)
+                button:HookScript("OnLeave", HideOwnTip)
+                button:HookScript("OnHide", HideOwnTip)
             end
         end
     end
@@ -293,18 +316,52 @@ local function SetupWorldMapButton()
         end
     end
 
-    -- Where the button sits: where the player put it (saved as a share of the map's width and
-    -- height, kept inside the map), or above the quest log's arrow.
+    -- Where the button may go: anywhere on the map's side of the window, from the window's left
+    -- edge to the map area's right edge (where the quest log or the panel starts), and from the
+    -- bottom up to the top of the zone menus' row. As left, bottom, right, top, in the map area's
+    -- units from its bottom left corner.
+    local function Bounds()
+        local vl, vb, vw, vh = viewport:GetLeft(), viewport:GetBottom(), viewport:GetWidth(), viewport:GetHeight()
+        if not (vl and vb and vw and vh) or vw <= 0 or vh <= 0 then return nil end
+        local vs = viewport:GetEffectiveScale()
+        local left, top = 0, vh
+        local ml = map:GetLeft()
+        if ml then left = math.min(0, ml * map:GetEffectiveScale() / vs - vl + 4) end
+        local row = map.NavBar or map.TitleCanvasSpacerFrame
+        local rowTop = row and row:GetTop()
+        if rowTop then top = math.max(vh, rowTop * row:GetEffectiveScale() / vs - vb) end
+        return left, 0, vw, top
+    end
+
+    -- Where the button sits: where the player put it (saved as a share of the map area's width and
+    -- height, kept inside Bounds), or above the quest log's arrow (with OpenMap, whose buttons are
+    -- there, in the map's top right corner).
     local function Anchor()
         btn:ClearAllPoints()
         local pos = FN.db.mapButtonPos
         local ratio = viewport:GetEffectiveScale() / btn:GetEffectiveScale()
-        local w, h = viewport:GetWidth() * ratio, viewport:GetHeight() * ratio
-        if pos and w > 0 and h > 0 then
+        local left, bottom, right, top = Bounds()
+        if pos and left then
+            local w, h = viewport:GetWidth() * ratio, viewport:GetHeight() * ratio
             local halfW, halfH = btn:GetWidth() / 2, btn:GetHeight() / 2
             btn:SetPoint("CENTER", viewport, "BOTTOMLEFT",
-                math.max(halfW, math.min(w - halfW, pos.x * w)),
-                math.max(halfH, math.min(h - halfH, pos.y * h)))
+                math.max(left * ratio + halfW, math.min(right * ratio - halfW, pos.x * w)),
+                math.max(bottom * ratio + halfH, math.min(top * ratio - halfH, pos.y * h)))
+        elseif OpenMapOn() then
+            -- The quest log button's gaps from the map's bottom right corner, mirrored at the top.
+            local side, bottom = 8, 8
+            local aRight, aBottom = arrow and arrow:GetRight(), arrow and arrow:GetBottom()
+            local vRight, vBottom = viewport:GetRight(), viewport:GetBottom()
+            if aRight and aBottom and vRight and vBottom then
+                local toBtn = arrow:GetEffectiveScale() / btn:GetEffectiveScale()
+                local vToBtn = viewport:GetEffectiveScale() / btn:GetEffectiveScale()
+                local gapSide = vRight * vToBtn - aRight * toBtn
+                local gapBottom = aBottom * toBtn - vBottom * vToBtn
+                if gapSide >= 0 and gapSide < 60 and gapBottom >= 0 and gapBottom < 60 then
+                    side, bottom = gapSide, gapBottom
+                end
+            end
+            btn:SetPoint("TOPRIGHT", viewport, "TOPRIGHT", -side, -bottom)
         elseif not arrow then
             btn:SetPoint("BOTTOMRIGHT", viewport, "BOTTOMRIGHT", -8, 48)
         else
@@ -625,8 +682,22 @@ local function SetupWorldMapButton()
         FillNote()
         RenderSoon()
     end
+    -- While OpenMap's own first question is up, ours waits (it would cover OpenMap's buttons), and
+    -- shows on this same opening once it is answered.
+    local waitingForOpenMap
     local function ShowSpotlight()
         if not (FN.db.spotlightDue and btn:IsShown()) or tourStep then return end
+        if OpenMapAsking() then
+            if not waitingForOpenMap then
+                waitingForOpenMap = C_Timer.NewTicker(0.25, function(ticker)
+                    if map:IsShown() and OpenMapAsking() then return end
+                    ticker:Cancel()
+                    waitingForOpenMap = nil
+                    if map:IsShown() then ShowSpotlight() end
+                end)
+            end
+            return
+        end
         if not spot then BuildSpotlight() end
         spot:SetScale(map:GetEffectiveScale() / UIParent:GetEffectiveScale())
         spot.faded = 0
@@ -648,69 +719,51 @@ local function SetupWorldMapButton()
         Render()
     end)
 
-    -- Moving the button: unlocked from the settings, it glows like a proc on the action bars,
-    -- follows a left-button drag inside the map, and locks again when the map closes.
-    local moveGlow
-    local function ShowMoveGlow(on)
-        if on and not moveGlow then
-            local ok, made = pcall(CreateFrame, "Frame", nil, btn, "ActionButtonSpellAlertTemplate")
-            if ok then
-                moveGlow = made
-                moveGlow:SetPoint("CENTER")
-                moveGlow.ProcStartFlipbook:Hide()
-            end
-        end
-        if not moveGlow then return end
-        moveGlow:SetSize(btn:GetWidth() * 1.4, btn:GetHeight() * 1.4)
-        moveGlow:SetShown(on)
-        if on then moveGlow.ProcLoop:Play() end
-    end
+    -- Moving the button: a left-button drag takes it anywhere on the map's side of the window
+    -- (Bounds), unless it is locked in the settings.
     local function FollowCursor()
         local x, y = GetCursorPosition()
         local scale = viewport:GetEffectiveScale()
+        local left, bottom, right, top = Bounds()
+        if not left then return end
         local w, h = viewport:GetWidth(), viewport:GetHeight()
-        if w <= 0 or h <= 0 then return end
         FN.db.mapButtonPos = {
-            x = math.max(0, math.min(1, (x / scale - viewport:GetLeft()) / w)),
-            y = math.max(0, math.min(1, (y / scale - viewport:GetBottom()) / h)),
+            x = math.max(left, math.min(right, x / scale - viewport:GetLeft())) / w,
+            y = math.max(bottom, math.min(top, y / scale - viewport:GetBottom())) / h,
         }
         Anchor()
         Render()
     end
     local function StopDragging()
+        if not dragging then return end
+        dragging = false
+        dragEnd = GetTime()
         btn:SetScript("OnUpdate", nil)
+        if FN.RefreshOptions then FN:RefreshOptions() end -- "Reset position" can be used now
     end
     btn:RegisterForDrag("LeftButton")
     btn:SetScript("OnDragStart", function(self)
-        if not unlocked then return end
+        if FN.db.mapButtonLocked or tourStep then return end
+        dragging = true
         FN.HideTip()
         self:SetScript("OnUpdate", FollowCursor)
     end)
-    btn:SetScript("OnDragStop", function()
-        StopDragging()
-        if FN.RefreshOptions then FN:RefreshOptions() end -- "Reset position" can be used now
-    end)
+    btn:SetScript("OnDragStop", StopDragging)
     btn:HookScript("OnHide", StopDragging)
-
-    local function SetUnlocked(on)
-        if on == unlocked then return end
-        unlocked = on
-        if not on then StopDragging() end
-        FN.HideTip()
-        ShowMoveGlow(on)
-        if FN.RefreshOptions then FN:RefreshOptions() end
-    end
-    map:HookScript("OnHide", function() SetUnlocked(false) end)
 
     function FN:MapButtonShown() return FN.db.mapButtonShown end
     function FN:SetMapButtonShown(shown)
         FN.db.mapButtonShown = shown
-        if not shown then SetUnlocked(false) end
+        if not shown then StopDragging() end
         btn:SetShown(shown)
         if FN.RefreshOptions then FN:RefreshOptions() end
     end
-    function FN:MapButtonLocked() return not unlocked end
-    function FN:SetMapButtonLocked(locked) SetUnlocked(not locked) end
+    function FN:MapButtonLocked() return FN.db.mapButtonLocked and true or false end
+    function FN:SetMapButtonLocked(locked)
+        FN.db.mapButtonLocked = locked and true or nil
+        if locked then StopDragging() end
+        if FN.RefreshOptions then FN:RefreshOptions() end
+    end
     function FN:MapButtonMoved() return FN.db.mapButtonPos ~= nil end
     function FN:ResetMapButton()
         StopDragging()
