@@ -3891,7 +3891,7 @@ local function BuildSettingsPage(columnA, columnB)
     Check(page, "Show the world map button",
         function() return FN:MapButtonShown() end,
         function(v) FN:SetMapButtonShown(v and true or false) end):SetPoint("TOPLEFT", 0, -324)
-    -- Unlocked, the button can be dragged around the map; closing the map locks it again.
+    -- The button can always be dragged around the map; locked, it stays where it is.
     local lockButton = Check(page, "Lock the world map button",
         function() return FN:MapButtonLocked() end,
         function(v) FN:SetMapButtonLocked(v and true or false) end)
@@ -4062,12 +4062,14 @@ local peeking = false   -- the quest log is up where the node panel usually is (
                         -- opened); the panel is back the next time the map opens
 
 -- The game's "quest log open" setting: the map's quest log arrow sets it, and M opens the map
--- with the quest log or without by it. It is the player's: the panel never changes it.
+-- with the quest log or without by it. It is the player's: the panel only borrows it while the
+-- panel is in use (see SyncQuestLogSetting) and always hands it back.
 local GetCV = (C_CVar and C_CVar.GetCVar) or GetCVar
 local SetCV = (C_CVar and C_CVar.SetCVar) or SetCVar
 
 -- Kept per character, so it survives closing the map and reloading:
 --   open         the node panel is the map's side panel
+--   questLogWas  the player's quest log setting, while the panel is borrowing it
 local function State()
     return ForeverNodesCharDB.panel
 end
@@ -4093,6 +4095,35 @@ local function MapIsFullScreen()
     return map and map.IsMaximized and map:IsMaximized() or false
 end
 
+-- Gives this character's quest log setting back, as it was before the panel borrowed it.
+local function ReleaseQuestLogSetting()
+    local state = State()
+    local was = state.questLogWas
+    if was == nil then return end
+    state.questLogWas = nil
+    if SetCV and GetCV("questLogOpen") ~= was then SetCV("questLogOpen", was) end
+end
+
+-- While the panel is in use the setting is kept on, so the game itself opens the map with the
+-- quest log (the panel's place) on every M, and M closes it outright. Addons are not allowed to
+-- open the quest log or close the map in combat; the game is. Should the quest log still be
+-- missing with the map open (the panel was turned on mid-fight), the setting says "off" until it
+-- is there, so M still agrees with what is on screen. Handed back when the panel is turned off.
+local function SyncQuestLogSetting()
+    if internal or not (GetCV and SetCV) then return end
+    local state = State()
+    if not (state.open and FN.db.dock) then
+        ReleaseQuestLogSetting()
+        return
+    end
+    local now = GetCV("questLogOpen")
+    if state.questLogWas == nil then state.questLogWas = now end
+    local map = WorldMapFrame
+    local missing = map and map:IsShown() and not MapIsFullScreen() and not QuestLogShown()
+    local want = missing and "0" or "1"
+    if now ~= want then SetCV("questLogOpen", want) end
+end
+
 local function ShouldDock()
     local map = WorldMapFrame
     return wantPanel and FN.db.dock and map and map:IsShown() and not MapIsFullScreen() or false
@@ -4101,7 +4132,8 @@ end
 local function SetQuestLog(show)
     local map = WorldMapFrame
     if not map.QuestLog or QuestLogShown() == show then return end
-    if InCombatLockdown() and map:IsProtected() then return end -- the map cannot be resized in combat
+    -- Not in combat: what the map does next would count as ours, and part of it is not allowed then.
+    if InCombatLockdown() then return end
     internal = true
     -- The game's own toggle also saves the quest log setting; put it back as it was.
     local keep = GetCV and GetCV("questLogOpen")
@@ -4376,7 +4408,7 @@ local function UndoMerge()
     if not state then return end
     merge = nil
     local map = WorldMapFrame
-    if MapOwnsItsSize() or (InCombatLockdown() and map:IsProtected()) then return end
+    if MapOwnsItsSize() or InCombatLockdown() then return end
     for _, a in ipairs(state.anchors) do
         local x = AnchorOffset(a[1], a[2])
         if x and math.abs(x - (a[5] - state.shift)) <= 0.5 then
@@ -4394,7 +4426,7 @@ end
 -- seen. Returns true when the panel can sit inside; merge.shift is its room.
 local function MergeIntoMap(fallback)
     local map = WorldMapFrame
-    if mergeGaveUp or MapOwnsItsSize() or (InCombatLockdown() and map:IsProtected()) then
+    if mergeGaveUp or MapOwnsItsSize() or InCombatLockdown() then
         UndoMerge()
         return false
     end
@@ -4818,6 +4850,7 @@ local function OpenPanel()
     -- Take the quest log's place: open it (if it is not already) and hide it under the panel.
     SetQuestLog(true)
     if QuestLogShown() then Cover(true) end
+    SyncQuestLogSetting()
     if frame:IsShown() then
         ApplyLayout() -- was floating: attach it
     else
@@ -4834,10 +4867,12 @@ local function ClosePanel(why)
     if why ~= "peek" then state.open = false end
     peeking = (why == "peek" and state.open) and true or false
     frame:Hide()
+    SyncQuestLogSetting() -- turned off: the player's own setting is back
     if covering then
         Cover(false)
-        -- The quest log was asked for: it stays, now seen. Otherwise the side closes.
-        SetQuestLog(why == "peek")
+        -- The quest log was asked for, or the player's map always shows it: it stays, now seen.
+        -- Otherwise the side closes (in combat it can't, so the quest log stays then too).
+        SetQuestLog(why == "peek" or (GetCV and GetCV("questLogOpen") == "1") or false)
     end
 end
 
@@ -4878,10 +4913,167 @@ function FN:UpdateDock()
     ApplyLayout()
 end
 
+-- Map icons in combat -----------------------------------------------------------------------------
+-- On this client, once an addon has run any of the map's own code (the panel opening or closing the
+-- quest log, /fn opening the map, a trainer pin switching its zone), the map icons' mouse setup
+-- (which clicks pass through them to the map) is refused in combat for the rest of the session, and
+-- every map refresh in combat shows "Interface action failed". So in combat that setup waits, and is
+-- done as soon as combat ends; until then a right click on an icon added mid-fight doesn't zoom the
+-- map out. OpenMap does the same for every addon: with it loaded, this is left to it.
+local function SetupCombatPins(map)
+    local loaded = C_AddOns and C_AddOns.IsAddOnLoaded or IsAddOnLoaded
+    if loaded and loaded("OpenMap") then return end
+    local passthrough = MapCanvasPinMixin and MapCanvasPinMixin.CheckMouseButtonPassthrough
+    if type(passthrough) ~= "function" then return end
+    local propagation = SuperTrackablePinMixin and SuperTrackablePinMixin.UpdateMousePropagation
+    if type(propagation) ~= "function" then propagation = nil end
+
+    local waiting = setmetatable({}, { __mode = "k" }) -- icon -> { passthrough = args, propagation = args }
+    local function Wait(pin, key, ...)
+        local w = waiting[pin] or {}
+        waiting[pin] = w
+        w[key] = { n = select("#", ...), ... }
+    end
+    local function Done(pin, key)
+        local w = waiting[pin]
+        if not w then return end
+        w[key] = nil
+        if not (w.passthrough or w.propagation) then waiting[pin] = nil end
+    end
+    local function Passthrough(pin, ...)
+        if InCombatLockdown() then return Wait(pin, "passthrough", ...) end
+        Done(pin, "passthrough")
+        return passthrough(pin, ...)
+    end
+    local function Propagation(pin, ...)
+        if InCombatLockdown() then return Wait(pin, "propagation", ...) end
+        Done(pin, "propagation")
+        return propagation(pin, ...)
+    end
+
+    -- Mixins copy their functions, so every table holding Blizzard's (the mixins made from it, and
+    -- the icons already made) is pointed at ours. A forbidden table is left alone.
+    local function Methods(t) return rawget(t, "CheckMouseButtonPassthrough"), rawget(t, "UpdateMousePropagation") end
+    local function Point(t)
+        if type(t) ~= "table" then return end
+        local ok, a, b = pcall(Methods, t)
+        if not ok then return end
+        if a == passthrough then t.CheckMouseButtonPassthrough = Passthrough end
+        if propagation and b == propagation then t.UpdateMousePropagation = Propagation end
+    end
+    local seenPool = setmetatable({}, { __mode = "k" })
+    local function PointPools(all)
+        for _, pool in pairs(map.pinPools or {}) do
+            if all or not seenPool[pool] then
+                seenPool[pool] = true
+                for _, how in ipairs({ "EnumerateActive", "EnumerateInactive" }) do
+                    if type(pool[how]) == "function" then
+                        local ok, iter, state, start = pcall(pool[how], pool)
+                        if ok and iter then
+                            for pin in iter, state, start do Point(pin) end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    -- Each global table is looked at once; later sweeps (an addon loaded later) only see new ones.
+    local checked = setmetatable({}, { __mode = "k" })
+    local function Sweep()
+        for _, value in pairs(_G) do
+            if type(value) == "table" and not checked[value] then
+                checked[value] = true
+                Point(value)
+            end
+        end
+        PointPools(true)
+    end
+    Sweep()
+    map:HookScript("OnShow", function() PointPools(true) end)
+    local scroll = map.ScrollContainer
+    if scroll and scroll.MarkCanvasDirty then
+        hooksecurefunc(scroll, "MarkCanvasDirty", function() PointPools(false) end) -- a new kind of icon
+    end
+    local events, sweepQueued = CreateFrame("Frame"), false
+    events:RegisterEvent("ADDON_LOADED")
+    events:RegisterEvent("PLAYER_REGEN_ENABLED")
+    events:SetScript("OnEvent", function(_, event)
+        if event == "ADDON_LOADED" then
+            if not sweepQueued then
+                sweepQueued = true
+                C_Timer.After(0, function()
+                    sweepQueued = false
+                    Sweep()
+                end)
+            end
+            return
+        end
+        -- Combat is over: what waited is done now (an icon let go meanwhile is skipped).
+        for pin, w in pairs(waiting) do
+            waiting[pin] = nil
+            if pin.IsForbidden and not pin:IsForbidden() and (not pin.GetMap or pin:GetMap()) then
+                if w.passthrough then pcall(passthrough, pin, unpack(w.passthrough, 1, w.passthrough.n)) end
+                if w.propagation then pcall(propagation, pin, unpack(w.propagation, 1, w.propagation.n)) end
+            end
+        end
+    end)
+end
+
+-- The quest log's lists in combat. The same goes for the quest log: once an addon has opened or
+-- closed it, each list row it sets up in combat marks itself for controller navigation
+-- (SmartNavigation_MarkFrameIgnored), which is refused then. That marking waits for the end of
+-- combat too; it only matters to a controller, and nothing else about the rows changes.
+local questLogWatched = false
+local function SetupCombatQuestLog()
+    if questLogWatched then return end
+    local mark = SmartNavigation_MarkFrameIgnored
+    if type(mark) ~= "function" then
+        -- (its addon not loaded yet: tried again as each addon loads)
+        local waitFor = CreateFrame("Frame")
+        waitFor:RegisterEvent("ADDON_LOADED")
+        waitFor:SetScript("OnEvent", function(self)
+            if type(SmartNavigation_MarkFrameIgnored) ~= "function" then return end
+            self:UnregisterEvent("ADDON_LOADED")
+            SetupCombatQuestLog()
+        end)
+        return
+    end
+    questLogWatched = true
+    local waiting = setmetatable({}, { __mode = "k" }) -- row -> its arguments
+    SmartNavigation_MarkFrameIgnored = function(row, ...)
+        if InCombatLockdown() and type(row) == "table" then
+            waiting[row] = { n = select("#", ...), ... }
+            return
+        end
+        if type(row) == "table" then waiting[row] = nil end
+        return mark(row, ...)
+    end
+    local events = CreateFrame("Frame")
+    events:RegisterEvent("PLAYER_REGEN_ENABLED")
+    events:SetScript("OnEvent", function()
+        for row, args in pairs(waiting) do
+            waiting[row] = nil
+            pcall(mark, row, unpack(args, 1, args.n))
+        end
+    end)
+end
+
 -- Called once at login: keeps the side panel in step with the map and the quest log.
 function FN:SetupMapPanel()
     local map = WorldMapFrame
+    -- Borrowed again for a panel left in use (it was handed back at logout), or handed back
+    -- after a crash.
+    SyncQuestLogSetting()
+    local logout = CreateFrame("Frame")
+    logout:RegisterEvent("PLAYER_LOGOUT")
+    logout:SetScript("OnEvent", function()
+        -- Kept on record too, in case the game does not save the change this late.
+        local was = State().questLogWas
+        if was ~= nil and SetCV then SetCV("questLogOpen", was) end
+    end)
     if not map then return end
+    SetupCombatPins(map)
+    SetupCombatQuestLog()
 
     -- The map's quest log arrow while the node panel is in use: it only moves the quest log in
     -- over the panel and out again (the panel stays on; only the node button turns it off), and
@@ -4961,6 +5153,7 @@ function FN:SetupMapPanel()
     -- which no size event reports: while the map is open, refit when its scale changes.
     local lastScale = MapScale()
     map:HookScript("OnUpdate", function()
+        SyncQuestLogSetting()
         -- The map came to the front (it was clicked): stay above it.
         if frame and frame:IsShown() and frame.docked then
             -- The map fades while the player moves (an option of the game's): fade with it.
@@ -5004,9 +5197,10 @@ function FN:SetupMapPanel()
     map:HookScript("OnHide", function()
         settled = false
         peeking = false
+        SyncQuestLogSetting()
     end)
     local busy = false
-    local function CanAct() return not (InCombatLockdown() and map:IsProtected()) end
+    local function CanAct() return not InCombatLockdown() end -- addons cannot open or close the map in combat
     local function DockedShown() return frame and frame:IsShown() and frame.docked end
     local function SettingOn() return GetCV and GetCV("questLogOpen") == "1" end
 
@@ -5062,6 +5256,7 @@ function FN:DockSettingChanged()
     if frame and frame:IsShown() and frame.docked and not FN.db.dock then
         wantPanel = false
         State().open = false
+        SyncQuestLogSetting()
         ApplyLayout()
     end
 end
@@ -5089,6 +5284,7 @@ function FN:ToggleOptions()
     wantPanel = false
     if frame:IsShown() then
         State().open = false
+        SyncQuestLogSetting()
         ApplyLayout() -- was the side panel: let go of the map
     else
         frame:Show()
@@ -5099,7 +5295,7 @@ end
 -- /fn: with docking on, open the world map with the node panel in it; otherwise the window.
 function FN:OpenFromCommand()
     local map = WorldMapFrame
-    if not (FN.db.dock and map) or (InCombatLockdown() and map:IsProtected()) then
+    if not (FN.db.dock and map) or InCombatLockdown() then
         FN:ToggleOptions() -- docking is off, or the map cannot be opened from here in combat
         return
     end
@@ -5267,7 +5463,12 @@ function FN:TourFinish()
     FN.db.sort = saved.sort
     if tourPanel then
         tourPanel = false
-        if WorldMapFrame:IsShown() and frame and frame:IsShown() then ClosePanel("x") else State().open = false end
+        if WorldMapFrame:IsShown() and frame and frame:IsShown() then
+            ClosePanel("x")
+        else
+            State().open = false
+            SyncQuestLogSetting()
+        end
     end
     if frame and frame:IsShown() then ShowPage(saved.page or selected) else selected = saved.page end
     if frame then RefreshNodes() end

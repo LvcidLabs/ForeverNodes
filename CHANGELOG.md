@@ -5,6 +5,24 @@
 - Resource names and tooltip matching follow the client locale. Recorded points
   and selections retain their canonical keys; recognized client names are remembered.
 
+## 1.4.1
+
+**Changes**
+
+- You can drag the world map button whenever you like now, anywhere left of the quest log, including up in the zone menu row.
+  - "Lock the world map button" in Settings > Advanced is now off by default, and just stops it from being dragged.
+- Turning the panel off now brings the quest log back if your map normally opens with it, so you can tell which map mode you're in.
+- With OpenMap installed, the world map button starts in the map's top right corner instead of hiding behind OpenMap's buttons.
+- With OpenMap installed, the tutorial popup now waits until you've picked your OpenMap map style, so the two don't cover each other.
+
+**Fixes**
+
+- Fixed "Interface action failed because of an AddOn" when opening or closing the world map in combat with the panel in use.
+- Fixed the same error showing up in combat after closing and reopening the panel, pinning a trainer, or opening the map with `/fn`.
+  - A couple of small map setup steps (right-click on map icons, controller navigation in the quest log) now wait until combat ends instead.
+- `/fn` in combat opens the floating window, since addons can't open the map mid-fight.
+- Fixed the world map button's tooltip disappearing after clicking it.
+
 ## 1.4.0
 
 **New**
