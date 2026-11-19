@@ -50,7 +50,7 @@ local POOL_WORDS = { "School", "Swarm", "Wreckage", "Debris", "Patch of", "Churn
 
 local function Say(text)
     -- The same yellow star marker the login line starts with.
-    print("|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t |cffffd100Forever Nodes:|r " .. text)
+    FN:Print("|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t |cffffd100Forever Nodes:|r " .. text)
 end
 
 local function Debug(text)
@@ -93,10 +93,10 @@ if C_Timer and C_Timer.NewTicker then C_Timer.NewTicker(0.25, ReadTooltip) end
 -- Pool name -> node key, for every pool type the addon knows.
 local function KeyForName(name)
     for _, node in ipairs(FN.nodes) do
-        if node.kind == "fish" and node.name == name then return node.key end
+        if node.kind == "fish" and FN:NodeMatches(node, name) then return node.key end
     end
     for id, known in pairs(NAMES) do
-        if known == name then return "pool_" .. id end
+        if known == name or FN:ClientName(known) == name then return "pool_" .. id end
     end
     for _, word in ipairs(POOL_WORDS) do
         if name:find(word, 1, true) then
@@ -380,7 +380,7 @@ end
 local function GatherKeyForName(name, kind)
     if not name then return nil end
     for _, node in ipairs(FN.nodes) do
-        if node.kind == kind and node.name == name then return node.key end
+        if node.kind == kind and FN:NodeMatches(node, name) then return node.key end
     end
     return nil
 end
@@ -420,6 +420,7 @@ local function StartGather(kind)
         return
     end
     local name, id = InteractTarget()
+    if id and gatherKeyByID[id] then FN:RememberNodeName(gatherKeyByID[id], name) end
     if not name and hoveredName and hoveredAt and GetTime() - hoveredAt < 10 then name = hoveredName end
     gather = { kind = kind, at = GetTime(), x = x, y = y, mapID = mapID, name = name, id = id }
     Debug(("%s gather seen%s"):format(kind, name and (": " .. name) or ""))

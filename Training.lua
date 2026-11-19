@@ -201,7 +201,7 @@ local function ZoneMapID(name)
             end
         end
     end
-    return zoneIDs[name]
+    return zoneIDs[name] or zoneIDs[FN:ClientName(name)]
 end
 
 -- The continent (or top-level map) a map belongs to: its map ID and name.
@@ -411,7 +411,7 @@ end
 local function Colored(kind, text) return "|cff" .. Hex(kind) .. text .. "|r" end
 
 local function Say(text)
-    if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage(TAG .. text, 1, 1, 1) end
+    if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage(TAG .. FN:Text(text), 1, 1, 1) end
 end
 
 local function Told(key)

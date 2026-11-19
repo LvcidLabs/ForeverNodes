@@ -80,6 +80,23 @@ Open your world map and the quick tutorial will show you around. Type `/fn help`
 
 <br>
 
+## Languages
+
+The interface follows the client language by default (Russian or English).
+Choose **Auto**, **Russian** or **English** under **Settings > Advanced > Interface language**;
+existing labels and segmented controls update immediately.
+Herb, vein and fishing-pool names always follow the **client** language, independently
+of that choice. Canonical node keys, selections and recorded coordinates are unchanged.
+Unknown names fall back to the bundled English name. A name returned by the client
+when gathering a known object is remembered per client locale and takes precedence.
+
+Localization is applied at the addon's own text output calls, without global UI hooks
+or modifying the game's strings. `Localization.lua` provides the display API and
+`Locales/ruRU.lua` the Russian catalogue. Edit the UTF-8 sources in
+`Tools/Localization/`, then run `python Tools/Localization/build.py`.
+Run `lua Tools/Localization/test.lua` from the repository root for the standalone
+language-matrix, recording, tooltip and live-switching checks (Lua 5.1+).
+
 ## Feedback
 
 Missing or misplaced node? [Open an issue](https://github.com/LvcidLabs/ForeverNodes/issues) with the zone and coordinates.
