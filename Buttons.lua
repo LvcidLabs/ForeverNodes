@@ -530,6 +530,7 @@ local function SetupWorldMapButton()
         noteRight:SetScript("OnClick", function()
             if not tourStep then
                 EndSpotlight()
+                if FN.OfferStylePicker then FN:OfferStylePicker() end -- then how nearby nodes look
             elseif tourStep < TOUR_STEPS then
                 GoToStep(tourStep + 1)
             else
@@ -559,9 +560,12 @@ local function SetupWorldMapButton()
     local function PlaceNote()
         local bx, by = btn:GetCenter()
         local left, right = viewport:GetLeft(), viewport:GetRight()
-        local top, bottom = viewport:GetTop(), viewport:GetBottom()
+        -- Up and down, the whole map window: the button may sit in the zone menus' row.
+        local top, bottom = map:GetTop(), map:GetBottom()
         if not (bx and left and top) then return end
         local ratio = viewport:GetEffectiveScale() / btn:GetEffectiveScale()
+        local mapRatio = map:GetEffectiveScale() / btn:GetEffectiveScale()
+        top, bottom = top * mapRatio / ratio - 6 / ratio, bottom * mapRatio / ratio + 6 / ratio
         local room = note:GetHeight() / 2 + 8
         local dy = math.max(bottom * ratio + room - by, math.min(top * ratio - room - by, 0))
         local onRight = bx < (left + right) / 2 * ratio

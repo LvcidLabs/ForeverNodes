@@ -1,3 +1,26 @@
+## 1.5.0
+
+**New**
+
+- World map styles in Settings > Maps & Icons > World map:
+  - *Normal:* node icons, as before.
+  - *Dot:* small dots, colored by profession or by difficulty for your skill, with an optional dark border.
+  - *Dynamic:* dots when zoomed out, growing into icons as you zoom in. Nodes near your cursor grow a little so the ones you point at are easy to read.
+- OpenMap support: with OpenMap installed, the world map uses Dynamic mode automatically. Untick "Auto-set Dynamic mode for OpenMap" to pick a style yourself. Your choice with and without OpenMap is remembered separately.
+- Added a Nearby Node Style picker. New players get it after the welcome popup, and anyone can open it with `/fn style`. Pick Circle, Dot or a custom mix, each with a preview.
+
+**Changes**
+
+- The nearby node marker now defaults to a circle for new installs. Your current settings are kept.
+- The marker previews now show the game's gold node dot underneath, to scale.
+- Icon size can now go all the way down to 1.
+- The Brown theme is now called Native.
+- The nearby node range note now reads ~185-190 yds, which is closer to when nodes really appear.
+
+**Fixes**
+
+- Fixed the welcome popup's arrow not pointing at the map button when it's in the top row of the map.
+
 ## 1.4.1
 
 **Changes**

@@ -64,25 +64,36 @@ FN.defaults = {
     -- top): the circle's border, the circle, the dot and the dot's border. Each part is on or
     -- off, takes the profession's color or its own ("prof" / "custom"), and has its own size.
     -- Ring radii are from the center to the middle of the line.
-    dotOn = true,
+    -- A new install starts on the circle (see the style picker, Options.lua).
+    dotOn = false,
     dotColorMode = "prof",
     dotColor = { 1, 1, 1 },
     dotSize = 4,
     dotEdgeOn = true,
     dotEdgeColorMode = "custom",
     dotEdgeColor = { 0, 0, 0, 0.63 },
-    dotEdgeRadius = 2.25,
+    dotEdgeRadius = 2.5, -- just outside the size 4 dot: a 1 wide ring from 2 to 3
     dotEdgeWidth = 1,
-    circleOn = false,
+    circleOn = true,
     circleColorMode = "prof",
     circleColor = { 0, 0, 0 },
-    circleRadius = 6.25,
-    circleWidth = 1.5,
+    circleRadius = 5,
+    circleWidth = 1,
     circleEdgeOn = true,
     circleEdgeColorMode = "custom",
     circleEdgeColor = { 0, 0, 0, 0.63 },
-    circleEdgeRadius = 7.5,
-    circleEdgeWidth = 0.5,
+    circleEdgeRadius = 6,
+    circleEdgeWidth = 1,
+    -- How nodes look on the world map: "normal" (icons), "dot" (small colored dots) or "dynamic"
+    -- (dots zoomed out, growing into icons as the map is zoomed in). Two picks are kept, one for
+    -- playing without OpenMap and one with it (used once its auto-set is turned off), so turning
+    -- OpenMap on or off never loses either (see FN:WorldMode).
+    worldMode = "normal",
+    worldModeOpenMap = "dynamic",
+    openMapDynamic = true,
+    worldDotColor = "prof", -- "prof" (the profession's color) or "difficulty" (by your skill)
+    worldDotSize = 3,
+    worldDotBorder = true,
     tone = "auto",   -- the panel's colors: "auto" (follows the interface), "brown" or "dark"
     mapButtonShown = true, -- the node panel's button on the world map
     showAll = true,  -- nodes of professions the character lacks can be ticked and shown on the maps
@@ -264,8 +275,10 @@ end
 
 -- The in-range marker, drawn on `f` (a pin, or the settings' preview), which holds the
 -- textures halo (circle), inner (the circle's border), mark (dot) and edge (the dot's
--- border). `color` is the profession's color. Sizes `f` to its largest part.
-function FN:DrawMarker(f, color)
+-- border). `color` is the profession's color. Sizes `f` to its largest part. `s` is the set of
+-- marker settings to draw (the saved ones when left out; the style picker passes its own).
+function FN:DrawMarker(f, color, s)
+    local db = s or db
     local whole = 1
     local function Grow(d) if d > whole then whole = d end end
     local function Pick(mode, own) return mode == "custom" and own or color end
@@ -311,11 +324,67 @@ function FN:MarkerTextures(f)
     for _, t in ipairs({ f.inner, f.halo, f.mark, f.edge }) do t:SetPoint("CENTER") end
 end
 
+-- For the previews: the game's own gold node dot, at its size on the minimap, under the marker
+-- (the game always draws it beneath ours).
+FN.GOLD_DOT_SIZE = 10
+function FN:MarkerGoldDot(f)
+    f.goldDot = f:CreateTexture(nil, "BACKGROUND")
+    f.goldDot:SetTexture(FN.MEDIA .. "gold_dot")
+    f.goldDot:SetSize(FN.GOLD_DOT_SIZE, FN.GOLD_DOT_SIZE)
+    f.goldDot:SetPoint("CENTER")
+end
+
 -- Pin frames (shared by minimap and world map) -------------------------------
 
 local pool = {}
 
--- Applies the current look: picture (plain or round) or in-range circle.
+-- Each profession's effective skill, looked up at most once a second (every dot asks).
+local skillAt, skillOf = -1, {}
+local function EffectiveSkill(kind)
+    local now = GetTime()
+    if now - skillAt > 1 then
+        skillAt = now
+        for _, k in ipairs(FN.kinds) do
+            local info = FN:GetSkillInfo(k)
+            skillOf[k] = info and info.effective or false
+        end
+    end
+    return skillOf[kind] or nil
+end
+
+-- A world map dot: the profession's color, or the node's difficulty for your skill (a node
+-- without a skill level, or a profession you lack, keeps the profession's color).
+local DOT_EDGE = { 0, 0, 0, 0.7 }
+local function StyleDot(pin, size, border, colorMode)
+    local node = pin.node
+    local c = db.colors[node.kind]
+    local r, g, b = c[1], c[2], c[3]
+    if colorMode == "difficulty" and node.skill and node.skill > 0 then
+        local skill = EffectiveSkill(node.kind)
+        if skill then r, g, b = FN:DifficultyColor(skill, node.skill) end
+    end
+    pin.bg:Hide()
+    pin.icon:Hide()
+    pin.halo:Hide()
+    pin.inner:Hide()
+    pin.mark:SetTexture(DISC)
+    pin.mark:SetSize(size, size)
+    pin.mark:SetVertexColor(r, g, b, 1)
+    pin.mark:Show()
+    local whole = size
+    if border then
+        whole = Ring(pin.edge, size / 2 + 0.5, 1, DOT_EDGE)
+    else
+        pin.edge:Hide()
+    end
+    -- A little larger than it looks, so it is easy to hover.
+    local hit = math.max(whole, 10)
+    pin:SetSize(hit, hit)
+end
+
+
+
+-- Applies the current look: picture (plain or round), in-range circle, or world map dot.
 local function StylePin(pin)
     local node = pin.node
     local color = db.colors[node.kind]
@@ -325,9 +394,32 @@ local function StylePin(pin)
         FN:DrawMarker(pin, color)
         return
     end
+    local iconSize
+    local mode = pin.where == "world" and FN:WorldMode() or "normal"
+    if mode == "dynamic" then
+        -- Set by `dynamic` below from the map's zoom: zoomed out, a small plain dot; zoomed in,
+        -- the node's icon, growing as the map is zoomed further in.
+        local mul = (pin.dynMul or 1) * (pin.dynBoost or 1) -- (the hover circle grows nodes under the cursor)
+        local size = pin.dynSize or 0
+        if size < 0.5 then
+            -- Zoomed too far out: not drawn at all (and too small to hover).
+            pin.bg:Hide(); pin.icon:Hide(); pin.mark:Hide(); pin.edge:Hide(); pin.halo:Hide(); pin.inner:Hide()
+            pin:SetSize(0.1, 0.1)
+            return
+        end
+        if pin.dynDot ~= false then
+            StyleDot(pin, math.max(1, size * mul), false, "prof")
+            return
+        end
+        iconSize = size * mul
+    elseif mode == "dot" then
+        StyleDot(pin, db.worldDotSize, db.worldDotBorder, db.worldDotColor)
+        return
+    end
 
     local look = db.icons[pin.where] or db.icons.minimap
-    pin:SetSize(look.size, look.size)
+    iconSize = iconSize or look.size
+    pin:SetSize(iconSize, iconSize)
     pin.mark:Hide()
     pin.edge:Hide()
     pin.halo:Hide()
@@ -377,6 +469,7 @@ local function AcquirePin(node, where)
     pin.node = node
     pin.where = where
     pin.near = false
+    pin.dynSize, pin.dynMul, pin.dynDot, pin.dynBoost = nil, nil, nil, 1 -- dynamic mode: set once the map shows the pin
     -- World map icons can show a tooltip: hover only, clicks still reach the map.
     -- Minimap icons never take the mouse.
     local hover = where == "world" and FN:TipCfg("world").on and pin.EnableMouseMotion ~= nil
@@ -729,6 +822,7 @@ local function RefreshWorldMapNow()
         mapPins[i] = nil
     end
 
+    FN.dynamicDirty = true -- new pins: dynamic mode looks at them all again
     if not (db and db.worldmap and WorldMapFrame and WorldMapFrame:IsShown()) then return end
     local mapID = WorldMapFrame:GetMapID()
     if not mapID then return end
@@ -755,6 +849,144 @@ local function QueueWorldMapRefresh()
     C_Timer.After(0, RefreshWorldMapNow)
 end
 
+-- Dynamic mode: node sizes follow the map's zoom, measured as how much ground one unit on screen
+-- covers (yards, from each map's real size). That is the same on Blizzard's map and OpenMap's,
+-- whichever map is showing underneath. The sizes were picked by eye at each zoom (recorded in
+-- game), and blended between: icons zoomed in, shrinking to dots, then nothing zoomed further
+-- out. Fixed, no settings.
+local DYN_CURVE = { -- { yards per unit, size } from zoomed in to zoomed out
+    { 1.34, 23 }, { 1.68, 22.5 }, { 2.10, 20 }, { 2.62, 20 }, { 3.27, 19 }, { 4.09, 16.5 },
+    { 5.12, 10 }, { 6.40, 6 }, { 8.00, 4 }, { 9.99, 2 }, { 12.49, 0 },
+}
+local DYN_DOT_UNDER = 4 -- below this size a node is a plain dot, at 4 and up its icon
+
+-- Yards of ground per UI unit on screen for the open map, or nil when it can't be worked out.
+local function YardsPerUnit(map)
+    local canvas = map.GetCanvas and map:GetCanvas()
+    local mapID = map.GetMapID and map:GetMapID()
+    if not (canvas and mapID) then return nil end
+    local yards = HBD:GetZoneSize(mapID)
+    local width = canvas:GetWidth()
+    if not (yards and yards > 0 and width and width > 0) then return nil end
+    local onScreen = width * canvas:GetEffectiveScale() / UIParent:GetEffectiveScale()
+    return onScreen > 0 and yards / onScreen or nil
+end
+
+-- The size for `y` yards per unit (0: not shown), blended between the curve's points on a log
+-- scale, as zoom steps feel even.
+local function DynamicSize(y)
+    local first, last = DYN_CURVE[1], DYN_CURVE[#DYN_CURVE]
+    if not y then return last[2] end
+    if y <= first[1] then return first[2] end
+    if y >= last[1] then return last[2] end
+    for i = 2, #DYN_CURVE do
+        local a, b = DYN_CURVE[i - 1], DYN_CURVE[i]
+        if y <= b[1] then
+            local t = (math.log(y) - math.log(a[1])) / (math.log(b[1]) - math.log(a[1]))
+            return a[2] + (b[2] - a[2]) * t
+        end
+    end
+    return last[2]
+end
+
+-- The look for `y` yards per unit: dot (true/false) and the size (0: not shown).
+local function DynamicLook(y)
+    local size = DynamicSize(y)
+    return size < DYN_DOT_UNDER, size
+end
+
+-- Under the cursor, nodes are drawn larger, so the ones being pointed at are easier to make out.
+-- Three rings, measured from the edge of the node at its largest: over the node itself, full size
+-- (a hard zone); then out to the middle ring, easing down quickly; then out to the outer ring, a
+-- gentle fade to nothing.
+local HOVER_GROW = 0.4   -- the growth the gentle zone's (below) goes with; the real growth is by zoom
+local HOVER_WIDE_GROW = 0.1 -- how much larger still at the middle ring
+-- The hover by zoom, picked by eye in game: { yards per unit, growth over the node, ring 2,
+-- ring 3 } (rings in UI units past the node's edge), blended between on a log scale.
+local HOVER_CURVE = {
+    { 1.34, 0.45, 56, 50 }, { 1.68, 0.45, 56, 50 }, { 2.10, 0.45, 28, 80 }, { 2.62, 0.55, 22, 110 },
+    { 3.27, 0.55, 16, 50 }, { 4.09, 0.65, 38, 100 }, { 5.12, 1.00, 50, 135 }, { 6.40, 2.00, 46, 130 },
+    { 8.00, 2.00, 20, 100 },
+}
+local function HoverAt(y)
+    local c = HOVER_CURVE
+    if y <= c[1][1] then return c[1][2], c[1][3], c[1][4] end
+    if y >= c[#c][1] then return c[#c][2], c[#c][3], c[#c][4] end
+    for i = 2, #c do
+        local a, b = c[i - 1], c[i]
+        if y <= b[1] then
+            local t = (math.log(y) - math.log(a[1])) / (math.log(b[1]) - math.log(a[1]))
+            return a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t, a[4] + (b[4] - a[4]) * t
+        end
+    end
+end
+local function Ease(t) return t * t * (3 - 2 * t) end
+
+local dynamic = CreateFrame("Frame")
+local lastY, lastCount, lastCX, lastCY = nil, -1, nil, nil
+dynamic:SetScript("OnUpdate", function()
+    local map = WorldMapFrame
+    if not (db and FN:WorldMode() == "dynamic" and db.worldmap and map and map:IsShown() and #mapPins > 0) then
+        lastY, lastCount, lastCX = nil, -1, nil
+        return
+    end
+    local y = YardsPerUnit(map) or DYN_CURVE[#DYN_CURVE][1]
+    local fresh = FN.dynamicDirty or #mapPins ~= lastCount
+    local zoomed = fresh or not lastY or math.abs(y - lastY) / lastY >= 0.005
+    local ui = UIParent:GetEffectiveScale()
+    local cx, cy = GetCursorPosition()
+    cx, cy = cx / ui, cy / ui
+    if not (map.ScrollContainer or map):IsMouseOver() then cx, cy = nil, nil end
+    local moved = cx ~= lastCX or cy ~= lastCY
+    if not (zoomed or moved) then return end
+    FN.dynamicDirty = nil
+    lastY, lastCount, lastCX, lastCY = y, #mapPins, cx, cy
+    local dot, size = DynamicLook(y)
+    -- The hover for this zoom (its strength scales the gentle zone's too).
+    local hoverGrow, hoverRing2, hoverRing3 = HoverAt(y)
+    local growMul = hoverGrow / HOVER_GROW
+    local ring2 = hoverRing2
+    local ring3 = math.max(hoverRing3, ring2 + 1)
+    local peakGrow = HOVER_GROW * growMul
+    for i = 1, #mapPins do
+        local pin = mapPins[i]
+        if zoomed then
+            pin.dynDot, pin.dynSize = dot, size
+            -- The size wanted on screen, in the pin's own units (the map scales its pins itself too).
+            pin.dynMul = ui / math.max(pin:GetEffectiveScale(), 0.01)
+        end
+        -- How much the hover circle grows this one.
+        local boost = 1
+        if cx then
+            local px, py = pin:GetCenter()
+            if px then
+                local k = pin:GetEffectiveScale() / ui
+                local d = math.sqrt((px * k - cx) ^ 2 + (py * k - cy) ^ 2)
+                -- Measured from the node's edge at its largest, not its middle: anywhere over the
+                -- grown node is the full growth (a hard zone, so it doesn't flicker while pointed
+                -- at), easing off only once the cursor is past it.
+                d = math.max(0, d - (pin.dynSize or 0) * (1 + peakGrow) / 2)
+                if d < ring3 then
+                    local grow
+                    if d < ring2 then
+                        -- Inside the middle ring: from full growth down to the gentle zone's.
+                        grow = HOVER_WIDE_GROW + (HOVER_GROW - HOVER_WIDE_GROW) * Ease(1 - d / math.max(ring2, 1))
+                    else
+                        -- Between the middle and outer rings: the gentle zone, fading out.
+                        grow = HOVER_WIDE_GROW * Ease(1 - (d - ring2) / (ring3 - ring2))
+                    end
+                    boost = 1 + grow * growMul
+                    boost = math.floor(boost * 100 + 0.5) / 100 -- steps, so a tiny move redraws nothing
+                end
+            end
+        end
+        if zoomed or pin.dynBoost ~= boost then
+            pin.dynBoost = boost
+            StylePin(pin)
+        end
+    end
+end)
+
 -- Public -----------------------------------------------------------------------
 
 -- Call after a change to which nodes are shown, or where.
@@ -773,7 +1005,20 @@ function FN:PointsChanged(key)
 end
 
 -- Call after a change to looks only (sizes, colors, round icons): cheap enough for a slider drag.
+-- Which saved pick the Mode setting shows and changes: the one for OpenMap while it is loaded.
+function FN:WorldModeKey()
+    return FN.openMapOn and "worldModeOpenMap" or "worldMode"
+end
+
+-- The world map look in use: dynamic with OpenMap (unless the player turned that off), otherwise
+-- the pick saved for playing with or without OpenMap.
+function FN:WorldMode()
+    if FN.openMapOn and db.openMapDynamic then return "dynamic" end
+    return db[FN:WorldModeKey()] or "normal"
+end
+
 function FN:Restyle()
+    FN.dynamicDirty = true -- dynamic mode's sizes worked out again (its settings may have changed)
     for _, pin in pairs(active) do StylePin(pin) end
     for i = 1, #mapPins do StylePin(mapPins[i]) end
     if FN.MarkerPreview then FN:MarkerPreview() end -- the settings' sample
@@ -817,6 +1062,11 @@ local function InitDB()
         if db.recordOre == nil then db.recordOre = db.recordGather end
         db.recordGather = nil
     end
+    -- The world map look was two tick boxes before (dot mode, dynamic mode); now one mode.
+    if db.worldMode == nil and db.worldDots then db.worldMode = "dot" end
+    db.worldModePicked = nil -- briefly used while testing: the mode followed OpenMap until picked
+    db.worldDots, db.worldDynamic = nil, nil
+    db.worldDynMin, db.worldDynMax, db.worldDynSwitch = nil, nil, nil -- dynamic mode's sizes are fixed now
     for key, value in pairs(FN.defaults) do
         if key ~= "colors" and key ~= "icons" and type(db[key]) ~= type(value) then
             db[key] = type(value) == "table" and { value[1], value[2], value[3], value[4] } or value
@@ -966,6 +1216,9 @@ driver:SetScript("OnEvent", function(self, event, arg1)
     elseif not db then
         return
     elseif event == "PLAYER_LOGIN" then
+        -- Whether OpenMap is in use (every add-on has loaded by now, so it can be seen).
+        local loaded = C_AddOns and C_AddOns.IsAddOnLoaded or IsAddOnLoaded
+        FN.openMapOn = loaded and loaded("OpenMap") or false
         poleEquipped = CheckPole()
         UpdateTracking()
         UpdateLearned()
@@ -980,7 +1233,7 @@ driver:SetScript("OnEvent", function(self, event, arg1)
             end
         end
         FN:SetupButtons()
-        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.4.1"
+        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.5.0"
         -- Gold name, white version, gold author; the hint goes on its own indented line.
         -- The yellow star is the game's own raid target marker, drawn at text height.
         -- The hint names the quickest way in that this player has on screen.
@@ -1016,7 +1269,13 @@ SlashCmdList.FOREVERNODES = function(text)
     local command = text:match("^%s*(%a+)")
     if command == "help" or command == "tutorial" or command == "dfl" then
         db.spotlightDue = true
+        -- dfl: the whole first launch again, the style picker after Okay included.
+        if command == "dfl" then db.styleOffered = nil end
         print("|cffffd100Forever Nodes:|r the quick guide shows the next time the world map opens")
+        return
+    end
+    if command == "style" then
+        FN:ShowStylePicker()
         return
     end
     if text:match("^%s*checkpole") then

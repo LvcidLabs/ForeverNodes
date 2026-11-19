@@ -46,6 +46,8 @@ Open your world map and the quick tutorial will show you around. Type `/fn help`
 
 - Herb, ore and fishing pool locations come preloaded
 - Shows on your minimap and world map
+- World map style: normal icons, small dots, or dynamic (dots zoomed out, icons zoomed in, larger under your cursor)
+- OpenMap support: dynamic mode is set automatically for OpenMap's zoomable map
 - New spots you gather from are saved to your own copy
 
 **Built into your world map**
@@ -75,7 +77,7 @@ Open your world map and the quick tutorial will show you around. Type `/fn help`
 **Make it yours**
 
 - Matches the stock UI or EllesmereUI automatically, or pick your own theme
-- Adjust colors, icons, tooltips, scale and the nearby node marker
+- Adjust colors, icons, tooltips, scale and the nearby node marker (circle, dot or your own mix)
 - Move the map button anywhere on the map
 
 <br>

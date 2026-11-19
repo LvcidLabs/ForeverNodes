@@ -2881,11 +2881,135 @@ local function BuildSettingsPage(columnA, columnB)
     local advancedOpen = false
     db.advancedOpen = nil -- briefly saved by an earlier version; no longer used
 
+    -- World map only: how nodes look there. Normal (icons), Dot (small colored dots) or Dynamic
+    -- (dots zoomed out, growing into icons as the map is zoomed in).
+    local LayoutMaps -- set below
+    -- With OpenMap: dynamic by default (its zoomable map suits it); unticked, the mode below is used.
+    local openMapCheck = Check(page, "Auto-set Dynamic mode for OpenMap",
+        function() return db.openMapDynamic end,
+        function(v)
+            db.openMapDynamic = v and true or false
+            ResyncAll()
+            Relayout(true)
+            FN:Restyle()
+        end)
+    local modeLabel = Label(page, nil, "Mode")
+    local modeCards = {}
+    for i, choice in ipairs({ { "normal", "Normal" }, { "dot", "Dot" }, { "dynamic", "Dynamic" } }) do
+        local card = Card(page, choice[2], 60, 22, function()
+            if FN.openMapOn and db.openMapDynamic then return end -- set by OpenMap (see the tick box)
+            db[FN:WorldModeKey()] = choice[1] -- with OpenMap and without are kept apart
+            ResyncAll()
+            Relayout(true)
+            FN:Restyle()
+        end)
+        card.offset = 46 + (i - 1) * 64
+        modeCards[choice[1]] = card
+    end
+    -- Under it, a line across the section: what follows belongs to the mode picked above it.
+    local modeLine = ToneLine(page)
+    modeLine:SetHeight(1)
+    local dotColorLabel = Label(page, nil, "Dot color")
+    local dotColorCards = {}
+    for i, choice in ipairs({ { "prof", "Profession" }, { "difficulty", "Difficulty" } }) do
+        local card = Card(page, choice[2], 80, 22, function()
+            db.worldDotColor = choice[1]
+            ResyncAll()
+            FN:Restyle()
+        end)
+        card.offset = 70 + (i - 1) * 86
+        dotColorCards[choice[1]] = card
+    end
+    local dotHint = Label(page, "GameFontDisableSmall", "")
+    local dotSize = Slider(page, "Dot size", 1, 16, 1, "%d", Number("worldDotSize"))
+    local dotBorder = Check(page, "Dark border",
+        function() return db.worldDotBorder end,
+        function(v)
+            db.worldDotBorder = v and true or false
+            FN:Restyle()
+        end)
+    -- Dynamic: no settings of its own (fixed sizes), only what it does.
+    local dynHint = Label(page, "GameFontDisableSmall",
+        "Small dots while zoomed out. Zoomed into a zone, icons that grow as you zoom further in.")
+    dynHint:SetJustifyH("LEFT")
+    if dynHint.SetWordWrap then dynHint:SetWordWrap(true) end
+    local roundCheck, sizeSlider -- made below; placed by LayoutMaps
+
     -- Lays out what the chosen map shows: no empty space for hidden controls.
-    local function LayoutMaps()
-        local y = 128 -- under the icon size slider
-        local round = Look().round
+    LayoutMaps = function()
+        local y = 54
+        local world = editing == "world"
+        local mode = world and FN:WorldMode() or "normal"
+        local dots, dynamicMode = mode == "dot", mode == "dynamic"
+        -- OpenMap in use: its tick box first; while ticked, the mode is locked to Dynamic.
+        local openMap = world and FN.openMapOn
+        local auto = openMap and db.openMapDynamic
+        openMapCheck:SetShown(openMap)
+        if openMap then
+            openMapCheck:SetPoint("TOPLEFT", 0, -y)
+            y = y + 26
+        end
+        modeLabel:SetShown(world)
+        modeLine:SetShown(world)
+        for _, card in pairs(modeCards) do card:SetShown(world) end
+        if world then
+            modeLabel:SetPoint("TOPLEFT", 0, -(y + 5))
+            modeLabel:SetAlpha(auto and 0.4 or 1)
+            for key, card in pairs(modeCards) do
+                card:SetSelected(mode == key)
+                card:SetPoint("TOPLEFT", card.offset, -y)
+                card:SetAlpha(auto and 0.4 or 1)
+                card:EnableMouse(not auto)
+            end
+            y = y + 32
+            -- The line runs border to border (the contents are inset from the section's edge).
+            modeLine:ClearAllPoints()
+            modeLine:SetPoint("TOPLEFT", iconsPage, "TOPLEFT", -SECTION_INSET, -y)
+            modeLine:SetPoint("TOPRIGHT", iconsPage, "TOPRIGHT", SECTION_INSET, -y)
+            y = y + 10
+        end
+        -- Dot: their color, size and border.
+        dotColorLabel:SetShown(dots)
+        dotHint:SetShown(dots)
+        dotSize:SetShown(dots)
+        dotBorder:SetShown(dots)
+        for _, card in pairs(dotColorCards) do card:SetShown(dots) end
+        if dots then
+            dotColorLabel:SetPoint("TOPLEFT", 0, -(y + 5))
+            for key, card in pairs(dotColorCards) do
+                card:SetSelected(db.worldDotColor == key)
+                card:SetPoint("TOPLEFT", card.offset, -y)
+            end
+            dotHint:SetText(db.worldDotColor == "difficulty"
+                and "Orange, yellow, green or grey for your skill, like recipes"
+                or "Each profession's own color (Settings > Professions)")
+            dotHint:SetPoint("TOPLEFT", dotColorCards.prof, "BOTTOMLEFT", 0, -4)
+            y = y + 44
+            dotSize:SetPoint("TOPLEFT", 0, -y)
+            y = y + 44
+            dotBorder:SetPoint("TOPLEFT", 0, -y)
+            y = y + 30
+        end
+        -- Dynamic: the two sizes, then (below) the icons' round setting.
+        dynHint:SetShown(dynamicMode)
+        if dynamicMode then
+            dynHint:SetWidth(iconsPage:GetWidth() > 0 and iconsPage:GetWidth() or 220)
+            dynHint:SetPoint("TOPLEFT", 0, -y)
+            y = y + math.ceil(dynHint:GetStringHeight()) + 10
+        end
+        -- Icons (Normal, and Dynamic's icons): round or not, their size, and the zoom of round ones.
+        roundCheck:SetShown(not dots)
+        sizeSlider:SetShown(not dots and not dynamicMode)
+        local round = not dots and Look().round
         zoom:SetShown(round) -- only meaningful for circular icons
+        if not dots then
+            roundCheck:SetPoint("TOPLEFT", 0, -y)
+            y = y + 30
+            if not dynamicMode then
+                sizeSlider:SetPoint("TOPLEFT", 0, -y)
+                y = y + 44
+            end
+        end
         if round then
             zoom:SetPoint("TOPLEFT", 0, -y)
             y = y + 44
@@ -2935,16 +3059,16 @@ local function BuildSettingsPage(columnA, columnB)
             Relayout(false) -- or its room stays open below it
         end
     end)
-    Check(page, "Circular Icons (crop to look cleaner)",
+    roundCheck = Check(page, "Circular Icons (crop to look cleaner)",
         function() return Look().round end,
         function(v)
             Look().round = v and true or false
             LayoutMaps()
             Relayout(true)
             FN:Restyle()
-        end):SetPoint("TOPLEFT", 0, -54)
+        end)
+    sizeSlider = Slider(page, "Icon size", 1, 32, 1, "%d", LookNumber("size"))
     syncers[#syncers + 1] = LayoutMaps
-    Slider(page, "Icon size", 8, 32, 1, "%d", LookNumber("size")):SetPoint("TOPLEFT", 0, -84)
 
     -- Colors -------------------------------------------------------------------
     -- Professions: each one's color, what shows when, and (folded) how the lists look.
@@ -3413,7 +3537,7 @@ local function BuildSettingsPage(columnA, columnB)
     local yards = Label(page, nil, "yds")
     yards:SetPoint("LEFT", range, "RIGHT", 6, 0)
     local hint = Label(page, "GameFontDisableSmall",
-        "Nodes officially appear at " .. FN.DEFAULT_RANGE .. " yds")
+        "Nodes officially appear between ~185-190 yds")
     hint:SetPoint("TOPLEFT", 0, -29)
 
     -- Marker parts. A "Dot | Circle" switch picks which one is being set up. Each side shows a
@@ -3618,6 +3742,7 @@ local function BuildSettingsPage(columnA, columnB)
     local sample = CreateFrame("Frame", nil, preview)
     sample:SetPoint("CENTER")
     FN:MarkerTextures(sample)
+    FN:MarkerGoldDot(sample) -- the game's own node dot, under the marker
     -- Each profession's color holds a moment, then blends into the next.
     local HOLD, BLEND = 1.2, 0.4
     local cycleAt, cycleIndex = 0, 1
@@ -3815,7 +3940,7 @@ local function BuildSettingsPage(columnA, columnB)
     GroupTitle("Theme", -74, true)
     local TONES = { "auto", "brown", "dark" }
     local theme
-    theme = MultiToggle(page, { "Auto", "Brown", "Dark" }, function(i)
+    theme = MultiToggle(page, { "Auto", "Native", "Dark" }, function(i)
         db.tone = TONES[i]
         theme:SetPick(i)
         for n = 1, #toneFollowers do toneFollowers[n]() end
@@ -5436,4 +5561,225 @@ function FN:TourFinish()
     if frame and frame:IsShown() then ShowPage(saved.page or selected) else selected = saved.page end
     if frame then RefreshNodes() end
     if FN.RefreshOptions then FN:RefreshOptions() end
+end
+
+-- The nearby node style picker ---------------------------------------------------------------
+-- Offered once, after the first launch note's Okay (and any time with /fn style): how a node in
+-- range looks on the minimap. Circle and Dot put the marker back to its defaults with that shape
+-- on and the other off (Circle keeps both borders, Dot only its own). Custom mix keeps the settings as they are and
+-- opens them beside the picker. A choice shows on the minimap straight away.
+
+local MARKER_KEYS = { "dotOn", "dotColorMode", "dotColor", "dotSize", "dotEdgeOn", "dotEdgeColorMode",
+    "dotEdgeColor", "dotEdgeRadius", "dotEdgeWidth", "circleOn", "circleColorMode", "circleColor",
+    "circleRadius", "circleWidth", "circleEdgeOn", "circleEdgeColorMode", "circleEdgeColor",
+    "circleEdgeRadius", "circleEdgeWidth" }
+
+local function CopyValue(v)
+    if type(v) ~= "table" then return v end
+    return { v[1], v[2], v[3], v[4] }
+end
+
+-- The marker settings of the Circle or Dot style.
+local function StyleValues(shape)
+    local s = {}
+    for _, key in ipairs(MARKER_KEYS) do s[key] = CopyValue(FN.defaults[key]) end
+    s.dotOn, s.circleOn = shape == "dot", shape == "circle"
+    s.dotEdgeOn, s.circleEdgeOn = true, shape == "circle"
+    return s
+end
+
+local function SameValue(a, b)
+    if type(a) == "table" and type(b) == "table" then
+        for i = 1, 4 do
+            if math.abs((a[i] or 1) - (b[i] or 1)) > 0.001 then return false end
+        end
+        return true
+    end
+    if type(a) == "number" and type(b) == "number" then return math.abs(a - b) < 0.001 end
+    return a == b
+end
+
+-- "circle" or "dot" while the saved settings are exactly that style; "custom" otherwise.
+local function CurrentStyle()
+    for _, shape in ipairs({ "circle", "dot" }) do
+        local s, same = StyleValues(shape), true
+        for _, key in ipairs(MARKER_KEYS) do
+            if not SameValue(FN.db[key], s[key]) then
+                same = false
+                break
+            end
+        end
+        if same then return shape end
+    end
+    return "custom"
+end
+
+local picker
+local PREVIEW = 76    -- each choice's sample of map
+local CHOICE_W = 92
+local STYLES = { { "circle", "Circle" }, { "dot", "Dot" }, { "custom", "Custom mix" } }
+
+-- The profession color the samples are drawn in: the first one the character has.
+local function SampleColor()
+    for _, kind in ipairs(FN.kinds) do
+        if FN:GetSkill(kind) then return FN.db.colors[kind] end
+    end
+    return FN.db.colors[FN.kinds[1]]
+end
+
+local function DrawSample(choice)
+    local values = choice.key ~= "custom" and StyleValues(choice.key) or nil
+    FN:DrawMarker(choice.sample, SampleColor(), values)
+    local room = PREVIEW - 8
+    local whole = math.max(choice.sample:GetWidth(), 1)
+    choice.sample:SetScale(math.max(math.min(2, room / whole), 0.5))
+end
+
+local function PaintChoices()
+    for _, choice in ipairs(picker.choices) do
+        local on = picker.selected == choice.key
+        for _, edge in ipairs(choice.edges) do
+            if on then
+                edge:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 1)
+            else
+                edge:SetColorTexture(0, 0, 0, 1)
+            end
+        end
+        choice.label:SetTextColor(on and GOLD[1] or 0.85, on and GOLD[2] or 0.85, on and GOLD[3] or 0.85)
+        DrawSample(choice)
+    end
+end
+
+local function Choose(key)
+    picker.selected = key
+    if key == "custom" then
+        -- The settings as they are, open beside the picker to be changed.
+        FN:OpenToSettings()
+        if FN.OpenSettingsSection then FN:OpenSettingsSection("nearby") end
+    else
+        local values = StyleValues(key)
+        for _, k in ipairs(MARKER_KEYS) do FN.db[k] = values[k] end
+        if FN.Restyle then FN:Restyle() end
+        FN:RefreshOptions()
+    end
+    PaintChoices()
+end
+
+local function BuildPicker()
+    picker = CreateFrame("Frame", "ForeverNodesStylePicker", UIParent)
+    picker:SetSize(3 * CHOICE_W + 2 * 12 + 40, 232)
+    picker:SetPoint("CENTER", 0, 120)
+    picker:SetFrameStrata("FULLSCREEN_DIALOG")
+    picker:SetToplevel(true)
+    picker:SetClampedToScreen(true)
+    picker:EnableMouse(true)
+    picker:SetMovable(true)
+    picker:RegisterForDrag("LeftButton")
+    picker:SetScript("OnDragStart", picker.StartMoving)
+    picker:SetScript("OnDragStop", picker.StopMovingOrSizing)
+    tinsert(UISpecialFrames, "ForeverNodesStylePicker") -- Esc closes it
+
+    -- The same window frame as the panel's floating window.
+    local shell = Stock() and TryTemplate("Frame", nil, picker, "BasicFrameTemplate")
+    local framed = shell ~= nil
+    shell = shell or CreateFrame("Frame", nil, picker)
+    shell:SetAllPoints()
+    shell:SetFrameLevel(picker:GetFrameLevel())
+    shell:EnableMouse(false)
+    local skin = Skin()
+    if skin then
+        skin.Shell(shell)
+    elseif not framed then
+        local bg = Fill(shell, "BACKGROUND", 0.07, 0.055, 0.04, 0.96)
+        bg:SetAllPoints()
+        Outline(shell, shell, BRONZE[1] * 0.6, BRONZE[2] * 0.6, BRONZE[3] * 0.6, 1)
+    end
+    local close = framed and shell.CloseButton
+    if not close then
+        close = CreateFrame("Button", nil, shell, "UIPanelCloseButton")
+        close:SetPoint("TOPRIGHT", 2, 2)
+        if skin and skin.CloseButton then skin.CloseButton(close) end
+    end
+    close:SetScript("OnClick", function() picker:Hide() end)
+    local TITLE_TEXT = "Nearby Node Style"
+    local stockTitle = framed and (shell.TitleText or (shell.TitleContainer and shell.TitleContainer.TitleText))
+    if stockTitle then
+        stockTitle:SetText(TITLE_TEXT)
+    else
+        local title = Label(shell, "GameFontNormal", TITLE_TEXT)
+        title:SetPoint("TOP", 0, -6)
+    end
+
+    local about = Label(picker, "GameFontHighlightSmall",
+        "How nodes in range show on your minimap, beside the game's own node dot. "
+        .. "You can change it anytime in Settings > Nearby nodes.")
+    about:SetWidth(picker:GetWidth() - 36)
+    about:SetJustifyH("CENTER")
+    if about.SetWordWrap then about:SetWordWrap(true) end
+    about:SetPoint("TOP", 0, -32)
+
+    picker.choices = {}
+    local left = -(3 * CHOICE_W + 2 * 12) / 2
+    for i, style in ipairs(STYLES) do
+        local choice = CreateFrame("Button", nil, picker)
+        choice.key = style[1]
+        choice:SetSize(CHOICE_W, PREVIEW + 24)
+        choice:SetPoint("TOPLEFT", picker, "TOP", left + (i - 1) * (CHOICE_W + 12), -72)
+        local map = CreateFrame("Frame", nil, choice)
+        map:SetSize(PREVIEW, PREVIEW)
+        map:SetPoint("TOP")
+        local ground = map:CreateTexture(nil, "BACKGROUND")
+        ground:SetTexture(FN.MEDIA .. "preview_map")
+        ground:SetAllPoints()
+        choice.edges = Outline(map, ground, 0, 0, 0, 1)
+        for _, edge in ipairs(choice.edges) do edge:SetDrawLayer("OVERLAY") end
+        local glow = choice:CreateTexture(nil, "HIGHLIGHT")
+        glow:SetAllPoints(ground)
+        glow:SetColorTexture(1, 1, 1, 0.08)
+        choice.sample = CreateFrame("Frame", nil, map)
+        choice.sample:SetPoint("CENTER")
+        FN:MarkerTextures(choice.sample)
+        FN:MarkerGoldDot(choice.sample)
+        choice.label = Label(choice, "GameFontNormal", style[2])
+        choice.label:SetPoint("TOP", map, "BOTTOM", 0, -6)
+        choice:SetScript("OnClick", function() Choose(choice.key) end)
+        picker.choices[i] = choice
+    end
+
+    local done = Card(picker, "Done", 110, 22, function() picker:Hide() end)
+    done:SetPoint("BOTTOM", 0, 14)
+
+    -- Custom mix's sample follows the settings while they are changed beside it.
+    local since = 0
+    picker:SetScript("OnUpdate", function(_, elapsed)
+        since = since + elapsed
+        if since < 0.2 then return end
+        since = 0
+        DrawSample(picker.choices[3])
+    end)
+    picker:Hide()
+    picker:SetScript("OnHide", function() FN.db.styleOffered = true end) -- seen and closed
+end
+
+-- `overMap`: centered on the open world map's map area (after the first launch note); otherwise
+-- (/fn style) a little above the middle of the screen.
+function FN:ShowStylePicker(overMap)
+    if not picker then BuildPicker() end
+    picker:ClearAllPoints()
+    local map = WorldMapFrame
+    if overMap and map and map:IsShown() then
+        picker:SetPoint("CENTER", map.ScrollContainer or map, "CENTER")
+    else
+        picker:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
+    end
+    picker.selected = CurrentStyle()
+    PaintChoices()
+    picker:Show()
+    picker:Raise()
+end
+
+-- After the first launch note's Okay: offered once.
+function FN:OfferStylePicker()
+    if FN.db.styleOffered then return end
+    FN:ShowStylePicker(true)
 end
