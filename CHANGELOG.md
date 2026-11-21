@@ -1,3 +1,10 @@
+## 1.5.1
+
+**Fixes**
+
+- Fixed "ForeverNodes has been blocked from an action only available to the Blizzard UI" in the game's Settings, and the Settings options flickering while hovered (most noticeable on the Social and Nameplates options).
+- Clicking a quest in your quest tracker now opens the map straight to the quest log, instead of showing the Forever Nodes panel first.
+
 ## 1.5.0
 
 **New**

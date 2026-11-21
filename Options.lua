@@ -5107,45 +5107,6 @@ local function SetupCombatPins(map)
     end)
 end
 
--- The quest log's lists in combat. The same goes for the quest log: once an addon has opened or
--- closed it, each list row it sets up in combat marks itself for controller navigation
--- (SmartNavigation_MarkFrameIgnored), which is refused then. That marking waits for the end of
--- combat too; it only matters to a controller, and nothing else about the rows changes.
-local questLogWatched = false
-local function SetupCombatQuestLog()
-    if questLogWatched then return end
-    local mark = SmartNavigation_MarkFrameIgnored
-    if type(mark) ~= "function" then
-        -- (its addon not loaded yet: tried again as each addon loads)
-        local waitFor = CreateFrame("Frame")
-        waitFor:RegisterEvent("ADDON_LOADED")
-        waitFor:SetScript("OnEvent", function(self)
-            if type(SmartNavigation_MarkFrameIgnored) ~= "function" then return end
-            self:UnregisterEvent("ADDON_LOADED")
-            SetupCombatQuestLog()
-        end)
-        return
-    end
-    questLogWatched = true
-    local waiting = setmetatable({}, { __mode = "k" }) -- row -> its arguments
-    SmartNavigation_MarkFrameIgnored = function(row, ...)
-        if InCombatLockdown() and type(row) == "table" then
-            waiting[row] = { n = select("#", ...), ... }
-            return
-        end
-        if type(row) == "table" then waiting[row] = nil end
-        return mark(row, ...)
-    end
-    local events = CreateFrame("Frame")
-    events:RegisterEvent("PLAYER_REGEN_ENABLED")
-    events:SetScript("OnEvent", function()
-        for row, args in pairs(waiting) do
-            waiting[row] = nil
-            pcall(mark, row, unpack(args, 1, args.n))
-        end
-    end)
-end
-
 -- Called once at login: keeps the side panel in step with the map and the quest log.
 function FN:SetupMapPanel()
     local map = WorldMapFrame
@@ -5161,7 +5122,6 @@ function FN:SetupMapPanel()
     end)
     if not map then return end
     SetupCombatPins(map)
-    SetupCombatQuestLog()
 
     -- The map's quest log arrow while the node panel is in use: it only moves the quest log in
     -- over the panel and out again (the panel stays on; only the node button turns it off), and
@@ -5272,7 +5232,15 @@ function FN:SetupMapPanel()
     for _, name in ipairs({ "QuestMapFrame_ShowQuestDetails", "QuestMapFrame_OpenToQuestDetails" }) do
         if type(_G[name]) == "function" then
             hooksecurefunc(name, function()
-                if covering and frame and frame:IsShown() and frame.docked then ClosePanel("peek") end
+                if covering and frame and frame:IsShown() and frame.docked then
+                    ClosePanel("peek")
+                elseif State().open and map:IsShown() then
+                    -- The map was opened for the quest (from the tracker): the quest log stays in
+                    -- front, and the panel doesn't take its place this time (it is back the next
+                    -- time the map opens).
+                    peeking = true
+                    if covering and not (frame and frame:IsShown()) then Cover(false) end
+                end
             end)
         end
     end
