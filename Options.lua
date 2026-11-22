@@ -1411,6 +1411,17 @@ local COIN = {
     "|TInterface\\MoneyFrame\\UI-SilverIcon:13:13:2:0|t",
     "|TInterface\\MoneyFrame\\UI-CopperIcon:13:13:2:0|t",
 }
+-- In place of a price for a rank taught by a quest: "Quest" and the game's quest-giver mark
+-- for where the player is with it: gold "!" to pick up, silver "?" in progress, gold "?" to hand in.
+local QUEST_MARK = {
+    available = "Interface\\GossipFrame\\AvailableQuestIcon",
+    active = "Interface\\GossipFrame\\IncompleteQuestIcon",
+    ready = "Interface\\GossipFrame\\ActiveQuestIcon",
+}
+local function QuestPrice(t)
+    local mark = QUEST_MARK[FN:TeachQuestState(t) or "available"]
+    return "|cff9d9d9dQuest|r|T" .. mark .. ":14:14:0:0|t"
+end
 -- Coins: each number sits snug against its icon, with a clear gap before the next coin.
 local function Money(copper)
     if copper == 0 then return "|cff9d9d9dfree|r" end
@@ -1894,7 +1905,7 @@ local function BuildHeader(page)
             local function Line(label, t)
                 local name = (REACTION[t.reaction] or "|cffffffff") .. t.name .. "|r"
                 local where = t.town ~= "" and t.town or t.zone
-                local price = Money(t.cost)
+                local price = t.teach == "quest" and QuestPrice(t) or Money(t.cost)
                 if t.cost > 0 and not Affordable(t.cost) then price = "|cffff2020" .. price .. "|r" end
                 tip:AddDoubleLine(label .. name .. " |cff9d9d9d\194\183 " .. where .. (t.yards and (" \194\183 " .. Yards(t.yards)) or "") .. "|r",
                     price, 0.6, 0.6, 0.6, 1, 1, 1)
@@ -2288,8 +2299,19 @@ local function BuildTrainers(page)
             local m = lit and 1.25 or 1
             self.frame:SetVertexColor(math.min(1, c[1] * m), math.min(1, c[2] * m), math.min(1, c[3] * m))
         end
-        r:SetScript("OnEnter", function(self) FrameTint(self, true); StartMarquee(self) end)
-        r:SetScript("OnLeave", function(self) FrameTint(self, false); self.press:Hide(); StopMarquee(self) end)
+        -- A vendor who sells the rank as an item (fishing's Expert book): the item's tooltip.
+        local function ItemTip(self)
+            local id = self.t and FN.TEACH_ITEM[self.t.teach]
+            if not id or not GameTooltip.SetItemByID then return end
+            GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+            GameTooltip:SetItemByID(id)
+            GameTooltip:Show()
+        end
+        r:SetScript("OnEnter", function(self) FrameTint(self, true); StartMarquee(self); ItemTip(self) end)
+        r:SetScript("OnLeave", function(self)
+            FrameTint(self, false); self.press:Hide(); StopMarquee(self)
+            if GameTooltip:IsOwned(self) then GameTooltip:Hide() end
+        end)
         r:SetScript("OnMouseDown", function(self) self.press:Show() end)
         r:SetScript("OnMouseUp", function(self) self.press:Hide() end)
         r:SetScript("OnClick", function(self) FN:TogglePin(self.t, L.kind) end)
@@ -2367,6 +2389,16 @@ local function BuildTrainers(page)
         if not L.ticker then L.ticker = C_Timer.NewTicker(0.5, Tick) end
         RefreshNodes()
     end
+    -- A quest giver's mark follows the quest: redraw when picking it up or finishing it
+    -- changes it (the quest log updates often, so only on a change).
+    local questWatch, questWas = CreateFrame("Frame"), nil
+    questWatch:RegisterEvent("QUEST_LOG_UPDATE")
+    questWatch:SetScript("OnEvent", function()
+        local state = FN:TeachQuestState({ teach = "quest" })
+        if state == questWas then return end
+        questWas = state
+        if L.open and L.kind == "fish" then RefreshNodes() end
+    end)
     function L:Close()
         if not L.open then return end
         L.open = false
@@ -2478,7 +2510,8 @@ local function BuildTrainers(page)
                 r.locBox:SetText(t.zone .. (t.town ~= "" and (" " .. LOC_DIM .. "(" .. t.town .. ")|r") or ""))
                 if bright then r.locBox.fs:SetTextColor(0.86, 0.85, 0.82) else r.locBox.fs:SetTextColor(0.62, 0.6, 0.56) end
                 -- The game's coin icons, in their box. Red when you can't afford it, green for the cheapest.
-                local price = Money(t.cost)
+                -- Fishing's Artisan rank is a quest, not a purchase.
+                local price = t.teach == "quest" and QuestPrice(t) or Money(t.cost)
                 if t.cost > 0 and not Affordable(t.cost) then price = "|cffff3030" .. price .. "|r"
                 elseif t.cost > 0 and cheap then price = "|cff40ff40" .. price .. "|r" end
                 r.price:SetText(price)
@@ -4567,19 +4600,44 @@ local function MapScale()
 end
 
 -- Docked, the panel goes on the map window's layer, or its border frame's when that is higher
--- (the border frame, the window's background and edges, can sit a layer above the map), well
--- above both. Kept in step every frame, since clicking the map brings it to the front.
+-- (the border frame, the window's background and edges, can sit a layer above the map), just
+-- above the window's own pieces (the quest log, the border, the buttons) the way the quest
+-- log itself is, so another addon's window shown over the map also shows over the panel.
+-- The map's contents (the zoomable canvas with its pins) are left out: they sit beside the
+-- panel and can go very high. Kept in step every frame, since clicking the map brings it
+-- to the front.
 local STRATA_ORDER = { BACKGROUND = 1, LOW = 2, MEDIUM = 3, HIGH = 4, DIALOG = 5,
     FULLSCREEN = 6, FULLSCREEN_DIALOG = 7, TOOLTIP = 8 }
+local rise, riseAt, riseTop = 1, -1, nil
+local function Rise(top, skip)
+    -- How far above `top` its highest piece sits. Measured at most once a second.
+    local now = GetTime()
+    if top == riseTop and now - riseAt < 1 then return rise end
+    riseAt, riseTop = now, top
+    local base, high = top:GetFrameLevel(), top:GetFrameLevel()
+    local strata = top:GetFrameStrata()
+    local function Walk(depth, ...)
+        for i = 1, select("#", ...) do
+            local c = select(i, ...)
+            if c ~= skip and c ~= frame and c.GetFrameLevel then
+                if c:GetFrameStrata() == strata and c:GetFrameLevel() > high then high = c:GetFrameLevel() end
+                if depth < 15 then Walk(depth + 1, c:GetChildren()) end
+            end
+        end
+    end
+    Walk(1, top:GetChildren())
+    rise = high - base + 1
+    return rise
+end
 local function DockPlace()
     local map = WorldMapFrame
     local top = map
     local border = map.BorderFrame
     if border and border.GetFrameStrata then
         local a, b = STRATA_ORDER[map:GetFrameStrata()] or 0, STRATA_ORDER[border:GetFrameStrata()] or 0
-        if b > a or (b == a and border:GetFrameLevel() > map:GetFrameLevel()) then top = border end
+        if b > a then top = border end
     end
-    return top:GetFrameStrata(), math.min(top:GetFrameLevel() + 1000, 9000)
+    return top:GetFrameStrata(), math.min(top:GetFrameLevel() + Rise(top, map.ScrollContainer), 9000)
 end
 
 local function ApplyLayout()

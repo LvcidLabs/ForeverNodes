@@ -1,3 +1,21 @@
+## 1.5.2
+
+**New**
+
+- Added Marefoil on Mount Hyjal (skill 300). It comes ticked for characters that already track herbs.
+- Hovering a trainer that teaches through an item, like the Expert Fishing book, shows that item's tooltip.
+- Nat Pagle now shows "Quest" instead of a price, with a quest icon that follows your progress: available, in progress, or ready to hand in.
+
+**Changes**
+
+- Demonsage has many more spots on Mount Hyjal and its own icon.
+- A new herb or ore type you record yourself is ticked straight away. If you recorded Demonsage or Marefoil before, those spots join the bundled ones.
+
+**Fixes**
+
+- The Forever Nodes panel no longer covers other addons' windows opened over the world map.
+- Dynamic mode now sizes nodes on zones the map library has no size for, instead of hiding them.
+
 ## 1.5.1
 
 **Fixes**

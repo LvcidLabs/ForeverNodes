@@ -152,6 +152,22 @@ function FN:LoadRecorded()
     for key, info in pairs(db.recordedNodes) do
         if info.kind == "fish" and info.id and herbOrOre[info.id] then
             db.recordedNodes[key], db.recordedPoints[key] = nil, nil
+        elseif info.id and herbOrOre[info.id] and herbOrOre[info.id] ~= key then
+            -- A herb or ore recorded as new that the bundled list has since added (Marefoil):
+            -- its spots move to the bundled type, and its tick with them.
+            local into = herbOrOre[info.id]
+            local from = db.recordedPoints[key]
+            if type(from) == "table" then
+                db.recordedPoints[into] = db.recordedPoints[into] or {}
+                for mapID, flat in pairs(from) do
+                    local list = db.recordedPoints[into][mapID] or {}
+                    db.recordedPoints[into][mapID] = list
+                    for i = 1, #flat do list[#list + 1] = flat[i] end
+                end
+            end
+            if FN.enabled and FN.enabled[key] then FN.enabled[into] = true end
+            if FN.enabled then FN.enabled[key] = nil end
+            db.recordedNodes[key], db.recordedPoints[key] = nil, nil
         end
     end
     for key, info in pairs(db.recordedNodes) do
@@ -203,6 +219,11 @@ local function RecordSpot(key, name, objectID, kind, x, y, mapID)
         name = name or ((kind == "fish" and "Fishing Pool " or "Unknown Node ") .. tostring(objectID or "?"))
         db.recordedNodes[key] = { name = name, id = objectID, kind = kind }
         isNewType = EnsureNode(key, name, kind)
+        -- Found by gathering it, so it is wanted: ticked straight away.
+        if isNewType then
+            FN.enabled[key] = true
+            if ForeverNodesCharDB and type(ForeverNodesCharDB.known) == "table" then ForeverNodesCharDB.known[key] = true end
+        end
     end
     local node = FN.byKey[key]
 
@@ -228,7 +249,7 @@ local function RecordSpot(key, name, objectID, kind, x, y, mapID)
     saved[#saved + 1] = y
 
     if isNewType then
-        Say(("new %s type recorded: %s. It is in the %s list, unticked.")
+        Say(("new %s type recorded: %s. It is ticked in the %s list.")
             :format(TYPE_WORDS[kind] or "node", node.name, LIST_NAMES[kind] or "node"))
     else
         Say(("recorded a new spot for %s."):format(node.name))
@@ -348,6 +369,7 @@ local GATHER_IDS = {
     golden_sansam = { 176583, 176638, 180167 }, dreamfoil = { 176584, 176639, 180168 },
     mountain_silversage = { 176586, 176640, 180166 }, plaguebloom = { 176587, 176641 },
     icecap = { 176588 }, black_lotus = { 176589 }, demonsage = { 566786 },
+    marefoil = { 566788 },
     copper_vein = { 1731, 2055, 3763, 103713, 103714, 562111 }, chunk_of_amber = { 656332 },
     large_chunk_of_amber = { 656333 }, tin_vein = { 1732, 3764, 2054, 103711, 103709 },
     incendicite_mineral_vein = { 1610, 1667 }, silver_vein = { 1733, 105569, 73940 },

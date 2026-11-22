@@ -126,6 +126,33 @@ for _, node in ipairs(FN.nodes) do
     FN.byKey[node.key] = node
 end
 
+-- Node types added in an update (herbs found since, like Marefoil) come ticked for a character
+-- that already gathers that kind (has any of its types ticked); a new character starts empty
+-- as before. ForeverNodesCharDB.known holds every type the character has had the chance to tick.
+local ADDED_LATER = { marefoil = true } -- types that came after the list was first remembered
+function FN:TickNewNodes()
+    local char = ForeverNodesCharDB
+    if not char then return end
+    if type(char.known) ~= "table" then
+        -- First run of this: everything is known except what came after (a new character: all).
+        char.known = {}
+        local fresh = next(FN.enabled) == nil
+        for _, node in ipairs(FN.nodes) do
+            if fresh or not ADDED_LATER[node.key] then char.known[node.key] = true end
+        end
+    end
+    local using = {}
+    for _, node in ipairs(FN.nodes) do
+        if FN.enabled[node.key] then using[node.kind] = true end
+    end
+    for _, node in ipairs(FN.nodes) do
+        if not char.known[node.key] then
+            char.known[node.key] = true
+            if using[node.kind] then FN.enabled[node.key] = true end
+        end
+    end
+end
+
 -- Character state ------------------------------------------------------------
 
 -- The character's skill in a gathering profession and the profession's icon;
@@ -860,12 +887,45 @@ local DYN_CURVE = { -- { yards per unit, size } from zoomed in to zoomed out
 }
 local DYN_DOT_UNDER = 4 -- below this size a node is a plain dot, at 4 and up its icon
 
+-- A map's width in yards. Some maps (Forever's Mount Hyjal) have no size the map library can
+-- work out: then from where the map sits on its parent (when it does), or a typical zone's width,
+-- so dynamic mode still sizes nodes there instead of hiding them.
+local TYPICAL_ZONE_YARDS = 3500
+local zoneYards = {}
+local function ZoneYards(mapID)
+    if zoneYards[mapID] then return zoneYards[mapID] end
+    local yards = HBD:GetZoneSize(mapID)
+    if not (yards and yards > 0) and C_Map and C_Map.GetMapInfo and C_Map.GetMapRectOnMap then
+        local id = mapID
+        for _ = 1, 4 do
+            local info = C_Map.GetMapInfo(id)
+            local parent = info and info.parentMapID
+            if not parent or parent == 0 then break end
+            local parentYards = HBD:GetZoneSize(parent)
+            if parentYards and parentYards > 0 then
+                local ok, left, right = pcall(C_Map.GetMapRectOnMap, mapID, parent)
+                if ok and left and right and right > left and right - left < 1 then yards = (right - left) * parentYards end
+                break
+            end
+            id = parent
+        end
+    end
+    if not (yards and yards > 0) then
+        -- Only a zone gets the typical width; a world or continent view keeps having none.
+        local info = C_Map and C_Map.GetMapInfo and C_Map.GetMapInfo(mapID)
+        if not (info and info.mapType and info.mapType >= 3) then return nil end
+        yards = TYPICAL_ZONE_YARDS
+    end
+    zoneYards[mapID] = yards
+    return yards
+end
+
 -- Yards of ground per UI unit on screen for the open map, or nil when it can't be worked out.
 local function YardsPerUnit(map)
     local canvas = map.GetCanvas and map:GetCanvas()
     local mapID = map.GetMapID and map:GetMapID()
     if not (canvas and mapID) then return nil end
-    local yards = HBD:GetZoneSize(mapID)
+    local yards = ZoneYards(mapID)
     local width = canvas:GetWidth()
     if not (yards and yards > 0 and width and width > 0) then return nil end
     local onScreen = width * canvas:GetEffectiveScale() / UIParent:GetEffectiveScale()
@@ -1223,6 +1283,7 @@ driver:SetScript("OnEvent", function(self, event, arg1)
         UpdateTracking()
         UpdateLearned()
         if FN.LoadRecorded then FN:LoadRecorded() end -- pools recorded in earlier sessions
+        FN:TickNewNodes()
         RebuildGrid()
         self:SetScript("OnUpdate", OnUpdate)
         if WorldMapFrame then
@@ -1233,7 +1294,7 @@ driver:SetScript("OnEvent", function(self, event, arg1)
             end
         end
         FN:SetupButtons()
-        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.5.1"
+        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.5.2"
         -- Gold name, white version, gold author; the hint goes on its own indented line.
         -- The yellow star is the game's own raid target marker, drawn at text height.
         -- The hint names the quickest way in that this player has on screen.

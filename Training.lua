@@ -78,6 +78,33 @@ end
 --        "book" (fishing Expert book vendor), "quest" (fishing Artisan quest giver).
 -- Coordinates from Wowhead's WoW: Forever profession guides (patch 1.60.1).
 
+-- The item a vendor sells to learn the rank, shown as its tooltip on the trainer's row.
+FN.TEACH_ITEM = { book = 16083 } -- Expert Fishing - The Bass and You
+-- The quest a giver hands out to learn the rank.
+local TEACH_QUEST = { quest = 6607 } -- Nat Pagle, Angler Extreme
+
+-- Where the player is with a quest giver's quest: "ready" (done, to hand in), "active"
+-- (in the quest log) or "available" (not picked up). Nil for anyone who isn't a quest giver.
+function FN:TeachQuestState(t)
+    local id = t and TEACH_QUEST[t.teach]
+    if not id then return end
+    local Q = C_QuestLog
+    local index
+    if Q and Q.GetLogIndexForQuestID then
+        index = Q.GetLogIndexForQuestID(id)
+    elseif GetNumQuestLogEntries and GetQuestLogTitle then
+        for i = 1, GetNumQuestLogEntries() do
+            if select(8, GetQuestLogTitle(i)) == id then index = i break end
+        end
+    end
+    if not index then return "available" end
+    local done
+    if Q and Q.ReadyForTurnIn then done = Q.ReadyForTurnIn(id) end
+    if not done and Q and Q.IsComplete then done = Q.IsComplete(id) end
+    if not done and IsQuestComplete then done = IsQuestComplete(id) end
+    return done and "ready" or "active"
+end
+
 local REP = { Orgrimmar = 76, ThunderBluff = 81, Undercity = 68, Darkspear = 530,
     Stormwind = 72, Ironforge = 47, Darnassus = 69, BootyBay = 21, Gadgetzan = 369, Cenarion = 609 }
 
