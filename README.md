@@ -14,9 +14,9 @@ Every known herb, ore and fishing pool in WoW: Forever on your map, and when and
   <a href="#user-content-gallery-trainer-pin"><img src="https://cdn.jsdelivr.net/gh/LvcidLabs/ForeverNodes@509b211/media/thumbs/trainer-pin.webp" alt="Skill bar and trainers" width="100"></a>
   <a href="#user-content-gallery-minimap"><img src="https://cdn.jsdelivr.net/gh/LvcidLabs/ForeverNodes@509b211/media/thumbs/minimap.webp" alt="Nearby marker" width="100"></a>
   <a href="#user-content-gallery-tooltips"><img src="https://cdn.jsdelivr.net/gh/LvcidLabs/ForeverNodes@509b211/media/thumbs/tooltips.webp" alt="Tooltips" width="100"></a>
-  <a href="#user-content-gallery-themes"><img src="https://cdn.jsdelivr.net/gh/LvcidLabs/ForeverNodes@509b211/media/thumbs/themes.webp" alt="Themes" width="100"></a>
   <a href="#user-content-gallery-map-button"><img src="https://cdn.jsdelivr.net/gh/LvcidLabs/ForeverNodes@509b211/media/thumbs/map-button.webp" alt="Map button" width="100"></a>
   <a href="#user-content-gallery-openmap"><img src="https://cdn.jsdelivr.net/gh/LvcidLabs/ForeverNodes@509b211/media/thumbs/openmap.webp" alt="OpenMap integration" width="100"></a>
+  <a href="#user-content-gallery-themes"><img src="https://cdn.jsdelivr.net/gh/LvcidLabs/ForeverNodes@509b211/media/thumbs/themes.webp" alt="Themes" width="100"></a>
   <a href="#user-content-gallery-settings"><img src="https://cdn.jsdelivr.net/gh/LvcidLabs/ForeverNodes@509b211/media/thumbs/settings.webp" alt="Settings" width="100"></a>
 </p>
 
@@ -48,12 +48,6 @@ Every known herb, ore and fishing pool in WoW: Forever on your map, and when and
 
 <br>
 
-<a id="gallery-themes"></a>
-<p align="center"><img src="https://cdn.jsdelivr.net/gh/LvcidLabs/ForeverNodes@509b211/media/themes.webp" alt="Themes" width="100%"></p>
-<p align="center"><sub>Forever Nodes matches your UI automatically, or pick Native or Dark yourself in Settings &gt; Interface. More themes are on the way, and requests are welcome. Tell me which UI you use and I'll help it fit right in.</sub></p>
-
-<br>
-
 <a id="gallery-map-button"></a>
 <p align="center"><img src="https://cdn.jsdelivr.net/gh/LvcidLabs/ForeverNodes@509b211/media/map-button.webp" alt="Map button" width="100%"></p>
 <p align="center"><sub>Quick access to everything gathering. Left-click to open the panel, right-click to show or hide map icons. Drag it anywhere on the map or lock it in Settings &gt; Interface. With OpenMap, star it to add it to the map's button tray.</sub></p>
@@ -63,6 +57,12 @@ Every known herb, ore and fishing pool in WoW: Forever on your map, and when and
 <a id="gallery-openmap"></a>
 <p align="center"><img src="https://cdn.jsdelivr.net/gh/LvcidLabs/ForeverNodes@509b211/media/openmap.webp" alt="OpenMap integration" width="100%"></p>
 <p align="center"><sub>With OpenMap (by jigrobbulus), Forever Nodes switches to Dynamic mode by itself: dots zoomed out, icons zoomed in, and bigger under your cursor. Star it in OpenMap's menu to put it on the map's button tray, with right-click for map icons.</sub></p>
+
+<br>
+
+<a id="gallery-themes"></a>
+<p align="center"><img src="https://cdn.jsdelivr.net/gh/LvcidLabs/ForeverNodes@509b211/media/themes.webp" alt="Themes" width="100%"></p>
+<p align="center"><sub>Forever Nodes matches your UI automatically, or pick Native or Dark yourself in Settings &gt; Interface. More themes are on the way, and requests are welcome. Tell me which UI you use and I'll help it fit right in.</sub></p>
 
 <br>
 
