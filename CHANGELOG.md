@@ -1,3 +1,9 @@
+## 1.5.6
+
+**Fixes**
+
+- The node list's background picture no longer stretches when the panel is tall (a tall map): it keeps its shape, with more of its plain paper above the illustration.
+
 ## 1.5.5
 
 **Changes**

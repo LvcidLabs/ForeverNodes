@@ -1224,30 +1224,95 @@ local function RefreshNodes()
         b:SetAlpha(rest and 0.35 or 1)
     end
 
-    -- The profession's own card art as the list box's background, exactly as the game's recipe
-    -- pane uses it: one picture (brown, glow, dark edges and the illustration) filling the box
-    -- edge to edge. The EllesmereUI look takes it in grey and a little darker, to suit its
-    -- flat, neutral panels.
+    -- The profession's own card art as the list box's background, as the game's recipe pane
+    -- uses it: one picture (brown, glow, dark edges and the illustration) across the box at its
+    -- exact width and shape. A box taller than the picture (a tall map) gets more of the plain
+    -- paper above the illustration instead of a stretched picture: the picture's upper part (dark
+    -- at the top, lightening downward) stays at the top, its lower part (the illustration) at the
+    -- bottom, and between them the light paper from just above the illustration is repeated in
+    -- strips, every other one mirrored so they join without seams, never scaled. So it still runs
+    -- from dark to light, then holds that tone down to the illustration. A
+    -- shorter box shows the picture's bottom. (Drawn from the atlas's file and coordinates: on
+    -- this client an atlas picture that is then cropped comes out blank.) The EllesmereUI look
+    -- takes it in grey and a little darker, to suit its flat, neutral panels.
     do
         if not page.art then
-            page.art = page.frame:CreateTexture(nil, "BACKGROUND", nil, 2)
-            page.art:SetPoint("TOPLEFT", page.frame, "TOPLEFT", -LIST_BLEED, LIST_BLEED)
-            page.art:SetPoint("BOTTOMRIGHT", page.frame, "BOTTOMRIGHT", LIST_BLEED, -LIST_BLEED)
+            local box = CreateFrame("Frame", nil, page.frame)
+            box:SetPoint("TOPLEFT", page.frame, "TOPLEFT", -LIST_BLEED, LIST_BLEED)
+            box:SetPoint("BOTTOMRIGHT", page.frame, "BOTTOMRIGHT", LIST_BLEED, -LIST_BLEED)
+            page.artBox = box
+            local function Piece() return page.frame:CreateTexture(nil, "BACKGROUND", nil, 2) end
+            page.art = Piece()    -- its lower part, the illustration
+            page.artTop = Piece() -- its upper part, dark to light
+            page.artFill = {}     -- the paper strips between
             -- Darkened a little, so the rows stand out from it.
             page.artShade = page.frame:CreateTexture(nil, "BACKGROUND", nil, 3)
-            page.artShade:SetAllPoints(page.art)
+            page.artShade:SetAllPoints(box)
+            -- (fractions of the picture's height: where its upper part ends, just above the
+            -- illustration, and the paper strip from just above that point that is repeated)
+            local SPLIT, STRIP = 0.35, 0.10
+            function page.FitArt()
+                local info = page.artInfo
+                if not info then return end
+                local w, h = box:GetSize()
+                if not (w and h) or w <= 0 or h <= 0 or (info.width or 0) <= 0 or (info.height or 0) <= 0 then return end
+                local l, r, t, b = info.leftTexCoord, info.rightTexCoord, info.topTexCoord, info.bottomTexCoord
+                local picH = w * info.height / info.width -- the picture's height at the box's width
+                local perPx = (b - t) / picH               -- texture coordinate per pixel, down it
+                local function Place(tex, top, height, v0, v1)
+                    tex:SetTexture(info.file)
+                    tex:SetDesaturated(page.artDesat)
+                    tex:ClearAllPoints()
+                    tex:SetPoint("TOPLEFT", box, "TOPLEFT", 0, -top)
+                    tex:SetPoint("TOPRIGHT", box, "TOPRIGHT", 0, -top)
+                    tex:SetHeight(height)
+                    tex:SetTexCoord(l, r, v0, v1)
+                    tex:Show()
+                end
+                for _, strip in ipairs(page.artFill) do strip:Hide() end
+                if h <= picH then
+                    page.artTop:Hide()
+                    Place(page.art, 0, h, b - h * perPx, b)
+                    return
+                end
+                local topH = SPLIT * picH
+                local vSplit = t + SPLIT * (b - t)
+                Place(page.artTop, 0, topH, t, vSplit)
+                -- Strips of the paper just above the split, starting mirrored (so the first carries
+                -- on from the upper part's bottom) and an even number of them, so the last ends where
+                -- the lower part begins.
+                local extra = h - picH
+                local n = 2 * math.max(1, math.ceil(extra / (2 * STRIP * picH)))
+                local stripH = extra / n
+                local vStrip = stripH * perPx
+                for i = 1, n do
+                    local strip = page.artFill[i] or Piece()
+                    page.artFill[i] = strip
+                    if i % 2 == 1 then
+                        Place(strip, topH + (i - 1) * stripH, stripH, vSplit, vSplit - vStrip) -- (mirrored)
+                    else
+                        Place(strip, topH + (i - 1) * stripH, stripH, vSplit - vStrip, vSplit)
+                    end
+                end
+                Place(page.art, topH + extra, picH - topH, vSplit, b)
+            end
+            box:SetScript("OnSizeChanged", function() page.FitArt() end)
         end
         local stock = BrownTone()
-        page.art:SetDesaturated(not stock)
+        page.artDesat = not stock
         page.artShade:SetColorTexture(0, 0, 0, stock and 0.175 or 0.4)
         local NAMES = { herb = "Herbalism", ore = "Mining", fish = "Fishing" }
         local card = current and NAMES[current] and ("Profession-background-card-" .. NAMES[current])
-        if card and C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(card) then
-            page.art:SetAtlas(card)
-            page.art:Show()
+        local info = card and C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(card)
+        if info and info.file then
+            page.artInfo = info
+            page.FitArt()
             page.artShade:Show()
         else
+            page.artInfo = nil
             page.art:Hide()
+            page.artTop:Hide()
+            for _, strip in ipairs(page.artFill) do strip:Hide() end
             page.artShade:Hide()
         end
     end
