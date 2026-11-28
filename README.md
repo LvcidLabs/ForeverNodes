@@ -7,7 +7,7 @@ Every known herb, ore and fishing pool in WoW: Forever on your map, and when and
 <p align="center">━━ ◈ ━━&nbsp;&nbsp;&nbsp;<b>Made exclusively for WoW: Forever</b>&nbsp;&nbsp;&nbsp;━━ ◈ ━━</p>
 
 <p align="center">
-  <img src="media/feature.png" alt="The Forever Nodes panel docked to the world map" width="100%">
+  <img src="media/feature.jpg" alt="The Forever Nodes panel docked to the world map" width="100%">
 </p>
 <p align="center"><sub>The panel sits right where the quest log does, with your node list, skill bar and settings in one place. Herbs and veins show on the map, and the Forever Nodes button sits right on it (right-click it to show or hide map icons).</sub></p>
 
@@ -26,43 +26,43 @@ Every known herb, ore and fishing pool in WoW: Forever on your map, and when and
 <br>
 
 <a id="gallery-feature"></a>
-<p align="center"><img src="media/feature.png" alt="Forever Nodes" width="100%"></p>
+<p align="center"><img src="media/feature.jpg" alt="Forever Nodes" width="100%"></p>
 <p align="center"><sub>The panel sits right where the quest log does, with your node list, skill bar and settings in one place. Herbs and veins show on the map, and the Forever Nodes button sits right on it (right-click it to show or hide map icons).</sub></p>
 
 <br>
 
 <a id="gallery-trainer-pin"></a>
-<p align="center"><img src="media/trainer-pin.png" alt="Skill bar and trainers" width="100%"></p>
+<p align="center"><img src="media/trainer-pin.jpg" alt="Skill bar and trainers" width="100%"></p>
 <p align="center"><sub>Your skill bar shows your rank at a glance and glows when you're ready to train. Click it for the closest and cheapest trainers for your next rank (reputation discounts included), then click a trainer to drop a pin on your map.</sub></p>
 
 <br>
 
 <a id="gallery-minimap"></a>
-<p align="center"><img src="media/minimap.png" alt="Nearby marker" width="100%"></p>
+<p align="center"><img src="media/minimap.jpg" alt="Nearby marker" width="100%"></p>
 <p align="center"><sub>In range, a node's minimap icon turns into a marker you design: a dot, a circle and their borders, each with its own size, width and radius. Color it by profession, difficulty, node type or custom. Smart detection handles your minimap's size and shape.</sub></p>
 
 <br>
 
 <a id="gallery-tooltips"></a>
-<p align="center"><img src="media/tooltips.png" alt="Tooltips" width="100%"></p>
+<p align="center"><img src="media/tooltips.jpg" alt="Tooltips" width="100%"></p>
 <p align="center"><sub>See the skill a node needs, colored by difficulty, on the world map, the minimap and herbs and veins in the world. Each tooltip has its own settings (placement, style and color), with a live preview.</sub></p>
 
 <br>
 
 <a id="gallery-themes"></a>
-<p align="center"><img src="media/themes.png" alt="Themes" width="100%"></p>
+<p align="center"><img src="media/themes.jpg" alt="Themes" width="100%"></p>
 <p align="center"><sub>Forever Nodes matches your UI automatically, or pick Native or Dark yourself in Settings &gt; Interface. More themes are on the way, and requests are welcome. Tell me which UI you use and I'll help it fit right in.</sub></p>
 
 <br>
 
 <a id="gallery-map-button"></a>
-<p align="center"><img src="media/map-button.png" alt="Map button" width="100%"></p>
+<p align="center"><img src="media/map-button.jpg" alt="Map button" width="100%"></p>
 <p align="center"><sub>Quick access to everything gathering. Left-click to open the panel, right-click to show or hide map icons. Drag it anywhere on the map or lock it in Settings &gt; Interface. With OpenMap, star it to add it to the map's button tray.</sub></p>
 
 <br>
 
 <a id="gallery-settings"></a>
-<p align="center"><img src="media/settings.png" alt="Settings" width="100%"></p>
+<p align="center"><img src="media/settings.jpg" alt="Settings" width="100%"></p>
 <p align="center"><sub>A full look at the settings revamped in v1.5.4: four tidy sections (Look &amp; Feel, Behavior Tweaks, Tooltips, Interface) and new options to color nodes by profession, difficulty, node type or a custom color.</sub></p>
 
 <br>
