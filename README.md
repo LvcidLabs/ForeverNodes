@@ -4,8 +4,6 @@
 
 Every known herb, ore and fishing pool in WoW: Forever on your map, and when and where to train.
 
-<p align="center">━━ ◈ ━━&nbsp;&nbsp;&nbsp;<b>Made exclusively for WoW: Forever</b>&nbsp;&nbsp;&nbsp;━━ ◈ ━━</p>
-
 <p align="center">
   <img src="https://cdn.jsdelivr.net/gh/LvcidLabs/ForeverNodes@0f73a00/media/feature.jpg" alt="The Forever Nodes panel docked to the world map" width="100%">
 </p>
@@ -68,6 +66,10 @@ Every known herb, ore and fishing pool in WoW: Forever on your map, and when and
 <br>
 
 </details>
+
+<br>
+
+<p align="center">━━ ◈ ━━&nbsp;&nbsp;&nbsp;<b>Made exclusively for WoW: Forever</b>&nbsp;&nbsp;&nbsp;━━ ◈ ━━</p>
 
 <br>
 
