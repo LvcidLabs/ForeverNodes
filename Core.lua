@@ -94,7 +94,11 @@ FN.defaults = {
     worldMode = "normal",
     worldModeOpenMap = "dynamic",
     openMapDynamic = true,
-    worldDotColor = "prof", -- "prof" (the profession's color) or "difficulty" (by your skill)
+    -- World map dots (Dot mode, and Dynamic's zoomed-out dots): "prof" (the profession's color),
+    -- "difficulty" (by your skill) or "node" (each node type's own color, FN.NODE_COLORS).
+    worldDotColor = "prof",
+    worldDotCustom = { 1, 1, 1 }, -- world map dots colored "custom" (apart from the nearby marker's)
+    nodeColors = {}, -- node key -> { r, g, b }: colors the player picked over FN.NODE_COLORS
     worldDotSize = 3,
     worldDotBorder = true,
     tone = "auto",   -- the panel's colors: "auto" (follows the interface), "brown" or "dark"
@@ -119,7 +123,51 @@ FN.defaults = {
     },
 }
 
+-- Each node type's own color, for dots colored by node type. Taken from its icon, then spread
+-- apart by hand so neighbours in the list (and types sharing an icon) are easy to tell apart;
+-- the herbs', ores' and fish pools' picked by hand in game.
+local function Hex(h)
+    return { tonumber(h:sub(1, 2), 16) / 255, tonumber(h:sub(3, 4), 16) / 255, tonumber(h:sub(5, 6), 16) / 255 }
+end
+FN.NODE_COLORS = {}
+for key, h in pairs({
+    peacebloom = "e0d9ba", silverleaf = "8fd843", tomb_weed = "9a9a70", earthroot = "8a632d",
+    mageroyal = "c94e44", briarthorn = "67602a", stranglekelp = "acd105", bruiseweed = "838000",
+    wild_steelbloom = "e2b163", grave_moss = "6e6d6f", kingsblood = "9900ab", nightmare_moss = "5f446f",
+    liferoot = "4230f2", fadeleaf = "9a86c8", goldthorn = "e0a830", khadgars_whisker = "93ba1f",
+    wintersbite = "f5ffc0", firebloom = "f43a26", dreamroot = "00c662", purple_lotus = "ae72ff",
+    arthas_tears = "7a3ae0", sungrass = "f0cc66", blindweed = "8fd1d8", ghost_mushroom = "a89b9f",
+    gromsblood = "e03023", moonroot = "beb5ce", star_lotus = "3be381", golden_sansam = "a39182",
+    dreamfoil = "7e8ce5", mountain_silversage = "75d8c3", plaguebloom = "af50e3", icecap = "b2caff",
+    black_lotus = "ffffff", demonsage = "d93641", marefoil = "c630e0",
+    copper_vein = "c16f1d", chunk_of_amber = "ed9745", large_chunk_of_amber = "ffa24a", tin_vein = "a7b2b0",
+    incendicite_mineral_vein = "c7502b", silver_vein = "e3e7ef", lesser_bloodstone_deposit = "8b2e2e",
+    iron_deposit = "616871", cold_iron_deposit = "495171", gold_vein = "f0c820", mithril_deposit = "d7edc3",
+    fools_gold_vein = "ad9145", truesilver_deposit = "a9ebef", dark_iron_deposit = "4a484b",
+    small_thorium_vein = "54d99f", starsilver_vein = "c5efed", greater_moonstone_formation = "d0c8f0",
+    rich_thorium_vein = "13ffa5", heavy_thorium_vein = "0a8154", small_obsidian_chunk = "6c38c0",
+    large_obsidian_chunk = "7b20b0",
+    firefin_snapper_school = "c98241", oily_blackmouth_school = "5a496f", sagefish_school = "6778d8",
+    greater_sagefish_school = "8563d8", floating_debris = "ffca00", floating_wreckage = "ffca00",
+    pool_floating_debris_wreckage = "ffca00", -- (recorded in game, not bundled yet)
+}) do FN.NODE_COLORS[key] = Hex(h) end
+
 local db
+
+-- A node type's color: the player's pick, else its own, else its profession's.
+function FN:NodeColor(node)
+    return db.nodeColors[node.key] or FN.NODE_COLORS[node.key] or db.colors[node.kind] or { 1, 1, 1 }
+end
+-- The saved color to change for a node type (made from its current color the first time).
+function FN:EditNodeColor(node)
+    local saved = db.nodeColors[node.key]
+    if not saved then
+        local c = FN:NodeColor(node)
+        saved = { c[1], c[2], c[3] }
+        db.nodeColors[node.key] = saved
+    end
+    return saved
+end
 
 -- Node lookup --------------------------------------------------------------
 
@@ -305,13 +353,20 @@ end
 
 -- The in-range marker, drawn on `f` (a pin, or the settings' preview), which holds the
 -- textures halo (circle), inner (the circle's border), mark (dot) and edge (the dot's
--- border). `color` is the profession's color. Sizes `f` to its largest part. `s` is the set of
+-- border). `color` is the profession's color, `nodeColor` the node type's and `skillColor`
+-- the node's difficulty for your skill (parts colored "node" or "difficulty" fall back to `color`). Sizes `f` to its largest part. `s` is the set of
 -- marker settings to draw (the saved ones when left out; the style picker passes its own).
-function FN:DrawMarker(f, color, s)
+function FN:DrawMarker(f, color, s, nodeColor, skillColor)
     local db = s or db
     local whole = 1
     local function Grow(d) if d > whole then whole = d end end
-    local function Pick(mode, own) return mode == "custom" and own or color end
+    -- "node": the node type's own color (`nodeColor`, falling back to the profession's).
+    local function Pick(mode, own)
+        if mode == "custom" then return own end
+        if mode == "node" then return nodeColor or color end
+        if mode == "difficulty" then return skillColor or color end
+        return color
+    end
 
     -- Circle, with its border underneath.
     if db.circleOn then
@@ -387,7 +442,8 @@ end
 local DOT_EDGE = { 0, 0, 0, 0.7 }
 local function StyleDot(pin, size, border, colorMode)
     local node = pin.node
-    local c = db.colors[node.kind]
+    local c = colorMode == "node" and FN:NodeColor(node)
+        or colorMode == "custom" and db.worldDotCustom or db.colors[node.kind]
     local r, g, b = c[1], c[2], c[3]
     if colorMode == "difficulty" and node.skill and node.skill > 0 then
         local skill = EffectiveSkill(node.kind)
@@ -421,7 +477,10 @@ local function StylePin(pin)
     if pin.near then
         pin.bg:Hide()
         pin.icon:Hide()
-        FN:DrawMarker(pin, color)
+        local skillColor
+        local skill = node.skill and node.skill > 0 and EffectiveSkill(node.kind)
+        if skill then skillColor = { FN:DifficultyColor(skill, node.skill) } end
+        FN:DrawMarker(pin, color, nil, FN:NodeColor(node), skillColor)
         return
     end
     local iconSize
@@ -438,7 +497,7 @@ local function StylePin(pin)
             return
         end
         if pin.dynDot ~= false then
-            StyleDot(pin, math.max(1, size * mul), false, "prof")
+            StyleDot(pin, math.max(1, size * mul), false, db.worldDotColor)
             return
         end
         iconSize = size * mul
@@ -1216,6 +1275,17 @@ local function InitDB()
         end
     end
 
+    -- A node color picked the same as its node's default is forgotten, so it follows the default
+    -- (which a later update may change).
+    if type(db.nodeColors) ~= "table" then db.nodeColors = {} end
+    for key, c in pairs(db.nodeColors) do
+        local own = FN.NODE_COLORS[key]
+        if type(c) ~= "table" or (own and math.abs((c[1] or 0) - own[1]) < 0.003
+            and math.abs((c[2] or 0) - own[2]) < 0.003 and math.abs((c[3] or 0) - own[3]) < 0.003) then
+            db.nodeColors[key] = nil
+        end
+    end
+
     -- One-time: replace the first release's guessed 100-yard default with the measured value.
     if not db.rangeMeasured then
         if db.range == 100 then db.range = FN.DEFAULT_RANGE end
@@ -1318,8 +1388,14 @@ driver:SetScript("OnEvent", function(self, event, arg1)
 end)
 
 -- The login line (also /fn version).
-function FN:PrintLogin()
-    local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.5.3"
+-- What's new in this version: a second line under the login one, very short and set in a few
+-- spaces so it stands apart from the next addon's line. Shown at the first login
+-- after it changes (a new version or new words), and with /fn version.
+local WHATS_NEW = "Settings revamp, new color options"
+local WHATS_NEW_LOOK = 5 -- (raise it when the line's look changes, so it shows again)
+
+function FN:PrintLogin(always)
+    local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.5.4"
     -- Logo, gold name, ring-gold version, grey "by", white author, a grey dash, gold /fn,
     -- and the button name fading letter by letter from the logo's lime to its cyan.
     -- The hint names the quickest way in that this player has on screen.
@@ -1338,7 +1414,15 @@ function FN:PrintLogin()
     local also = button and (GREY .. " or |r" .. Fade(button)) or ""
     print(FN.CHAT_ICON .. "|cffffd100Forever Nodes|r |cffc8a050v" .. version .. "|r"
         .. GREY .. " by |r|cffffffffLvcid|r" .. GREY .. " — |r"
-        .. "|cffffd100/fn|r" .. also .. GREY .. " to open|r")
+        .. "|cffffd100/fn|r" .. also .. GREY .. " to open.|r")
+    local seen = version .. " " .. WHATS_NEW_LOOK .. " " .. (WHATS_NEW or "")
+    if WHATS_NEW and (always or db.whatsNewSeen ~= seen) then
+        db.whatsNewSeen = seen
+        -- Set in a few spaces: "New" in the version's ring gold between two dim gold dots, then
+        -- the words in grey.
+        local DOT = "|cff7a6332·|r"
+        print("      " .. DOT .. " |cffc8a050New|r " .. DOT .. " " .. GREY .. WHATS_NEW .. "|r")
+    end
 end
 
 SLASH_FOREVERNODES1 = "/fn"
@@ -1348,7 +1432,7 @@ SlashCmdList.FOREVERNODES = function(text)
     text = text and text:lower() or ""
     local command = text:match("^%s*(%a+)")
     -- Prints the login line again (version, author, how to open).
-    if command == "version" then FN:PrintLogin() return end
+    if command == "version" then FN:PrintLogin(true) return end
     if command == "help" or command == "tutorial" or command == "dfl" then
         db.spotlightDue = true
         -- dfl: the whole first launch again, the style picker after Okay included.

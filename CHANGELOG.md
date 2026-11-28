@@ -1,3 +1,26 @@
+## 1.5.4
+
+**New**
+
+- Color by node type: dots and the nearby marker can take each node's own color (copper orange, tin silver and so on), with every herb, ore and fish pool's color changeable in a Node Colors list. Thanks to a CurseForge commenter for the idea.
+- The nearby marker can also be colored by Difficulty, and world map dots by a Custom color of their own.
+- The color picker has a Default button that puts a color back to its default.
+
+**Changes**
+
+- Settings revamp: four sections instead of six.
+  - Look & Feel has World Map, Minimap and Nearby tabs.
+  - Behavior Tweaks holds the showing rules, the nearby range, the panel list options and discovery.
+  - Tooltips and Interface (formerly Advanced) follow the same clean layout.
+- The open settings section's header (and Look & Feel's tabs and preview) stays at the top while you scroll it.
+- Dynamic mode's zoomed-out dots follow the chosen dot colors instead of always using the profession color.
+- Long node names show in full when hovered.
+- The login message has a short "New" line after an update.
+
+**Fixes**
+
+- Picking a color for one node and then clicking another no longer changes the first one.
+
 ## 1.5.3
 
 **New**

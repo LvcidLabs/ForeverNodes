@@ -149,9 +149,13 @@ end
 -- The panel's colors. The window's frame, buttons and selection follow the interface; these
 -- follow the Theme setting and can be swapped live.
 local TONE = {
-    brown = { fill = { 0.20, 0.13, 0.07, 0.85 }, line = { 0.20, 0.13, 0.07, 0.85 }, tint = { 0.20, 0.13, 0.07, 0.25 },
+    brown = { back = { 0.10, 0.07, 0.04, 1 }, backHead = { 0.08, 0.055, 0.03, 1 }, strip = { 0.08, 0.05, 0.025, 1 },
+        fill = { 0.20, 0.13, 0.07, 0.85 }, line = { 0.20, 0.13, 0.07, 0.85 }, tint = { 0.20, 0.13, 0.07, 0.25 },
         edge = { 0.55, 0.42, 0.20, 0.55 }, swatch = { 0.44, 0.31, 0.17, 1 }, chip = { 0.16, 0.10, 0.05, 0.85 } },
-    dark = { fill = { 1, 1, 1, 0.07 }, line = { 1, 1, 1, 0.10 }, tint = { 1, 1, 1, 0.025 },
+    -- (back / backHead: the panel's own color under an open section / under a header, measured
+    -- in game; strip: Preview's darker brown)
+    dark = { back = { 0.082, 0.074, 0.063, 1 }, backHead = { 0.059, 0.051, 0.047, 1 },
+        strip = { 0.062, 0.050, 0.038, 1 }, fill = { 1, 1, 1, 0.07 }, line = { 1, 1, 1, 0.10 }, tint = { 1, 1, 1, 0.025 },
         edge = { 1, 1, 1, 0.10 }, swatch = { 1, 1, 1, 0.34 }, chip = { 1, 1, 1, 0.08 } },
 }
 local toneFollowers = {}
@@ -216,7 +220,7 @@ local function Scroller(parent)
     -- The marker is a slim bar inside a wider, invisible grip that can be dragged.
     local grip = CreateFrame("Button", nil, sf)
     grip:SetWidth(11)
-    grip:SetFrameLevel(sf:GetFrameLevel() + 10)
+    grip:SetFrameLevel(sf:GetFrameLevel() + 60) -- (over a settings section's pinned header)
     local thumb = Fill(grip, "OVERLAY", BRONZE[1], BRONZE[2], BRONZE[3], 0.8)
     thumb:SetWidth(3)
     thumb:SetPoint("TOP", grip, "TOP", 0, 0)
@@ -235,7 +239,7 @@ local function Scroller(parent)
     end
     local syncingBar = false
     if bar then
-        bar:SetFrameLevel(sf:GetFrameLevel() + 10)
+        bar:SetFrameLevel(sf:GetFrameLevel() + 60)
         if bar.SetHideIfUnscrollable then bar:SetHideIfUnscrollable(true) end
         bar:RegisterCallback("OnScroll", function(_, pct)
             if syncingBar or not sf.range or sf.range <= 0 then return end
@@ -875,6 +879,19 @@ local function PickerExtras()
     end
     Tip(copy, "Copy color", "Remembers this color, to paste into another color in Forever Nodes.")
     Tip(paste, "Paste color", "Uses the color last copied with Copy.")
+    -- Puts back the color's own default (only for colors that have one: f.default).
+    local reset = Card(f, "Default", 58, 22, function()
+        local c = f.default and f.default()
+        if c then f.set(c[1], c[2], c[3], c[4] or 1) end
+    end)
+    reset:HookScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Default color")
+        GameTooltip:AddLine("Puts back this color's own default.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    reset:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    f.resetButton = reset
 
     if stockHex then
         -- Inside the window, where the game's box was. That one steps aside only while our
@@ -893,11 +910,18 @@ local function PickerExtras()
         box:SetFontObject(GameFontHighlightSmall) -- all eight digits fit
         box:SetPoint("RIGHT", stockHex, "RIGHT", 0, 0)
         hash:SetPoint("RIGHT", box, "LEFT", -5, 0)
-        paste:SetPoint("BOTTOMRIGHT", box, "TOPRIGHT", 2, 10)
-        copy:SetPoint("BOTTOMRIGHT", paste, "TOPRIGHT", 0, 4)
+        -- Under the picker's color square: Copy | Paste side by side, Default under them,
+        -- just over the hex box (a third row would reach up over the square).
+        -- (narrow enough to keep clear of the opacity slider at their left)
+        reset:SetSize(94, 22)
+        reset:SetPoint("BOTTOMRIGHT", box, "TOPRIGHT", 0, 8)
+        paste:SetSize(45, 22)
+        paste:SetPoint("BOTTOMRIGHT", reset, "TOPRIGHT", 0, 4)
+        copy:SetSize(45, 22)
+        copy:SetPoint("RIGHT", paste, "LEFT", -4, 0)
     else
         -- An older picker with no hex box of its own: a strip under the window.
-        f:SetSize(252, 36)
+        f:SetSize(316, 36)
         f:SetPoint("TOP", ColorPickerFrame, "BOTTOM", 0, -2)
         f:EnableMouse(true)
         local bg = Fill(f, "BACKGROUND", 0.07, 0.055, 0.04, 0.96)
@@ -908,6 +932,7 @@ local function PickerExtras()
         box:SetPoint("LEFT", hash, "RIGHT", 9, 0)
         copy:SetPoint("LEFT", box, "RIGHT", 12, 0)
         paste:SetPoint("LEFT", copy, "RIGHT", 4, 0)
+        reset:SetPoint("LEFT", paste, "RIGHT", 4, 0)
     end
 
     ColorPickerFrame:HookScript("OnHide", function() f:Hide() end)
@@ -915,15 +940,26 @@ local function PickerExtras()
     return f
 end
 
-local function PickColor(color, onChange)
+-- Each opening of the picker is one edit. Opening it for another color while it is still up
+-- ends the one before (its color stays as it was picked so far, already saved as it changed):
+-- only the newest edit's callbacks may change a color, so the picker setting itself up for the
+-- next color can't paint that color onto the one before, or the one before onto the next.
+local pickEdit = 0
+local function PickColor(color, onChange, getDefault)
+    pickEdit = pickEdit + 1
+    local edit, ready = pickEdit, false
+    local function Current() return edit == pickEdit and ready end
     -- color = { r, g, b, opacity }; opacity is 1 when it was never set.
     local r0, g0, b0, a0 = color[1], color[2], color[3], color[4] or 1
     local extras = PickerExtras()
     extras.color = color
+    extras.default = getDefault
+    extras.resetButton:SetShown(getDefault ~= nil)
     function extras.sync()
         if not extras.box:HasFocus() then extras.box:SetText(ColorToHex(color)) end
     end
     function extras.set(r, g, b, a) -- from the hex box or Paste; six-digit hex keeps the opacity
+        if not Current() then return end
         a = a or color[4] or 1
         SetPicker(r, g, b, a)
         color[1], color[2], color[3], color[4] = r, g, b, a
@@ -932,6 +968,7 @@ local function PickColor(color, onChange)
     end
     local modern = ColorPickerFrame.SetupColorPickerAndShow ~= nil
     local function Apply()
+        if not Current() then return end
         color[1], color[2], color[3] = ColorPickerFrame:GetColorRGB()
         if ColorPickerFrame.GetColorAlpha then
             color[4] = ColorPickerFrame:GetColorAlpha()
@@ -942,6 +979,7 @@ local function PickColor(color, onChange)
         extras.sync()
     end
     local function Cancel()
+        if edit ~= pickEdit then return end -- (an edit already replaced by a newer one is kept)
         color[1], color[2], color[3], color[4] = r0, g0, b0, a0
         onChange()
     end
@@ -956,6 +994,13 @@ local function PickColor(color, onChange)
         ColorPickerFrame:SetColorRGB(r0, g0, b0)
         ColorPickerFrame:Show()
     end
+    -- Set up: from here on the picker's changes are this color's. Whatever it reported while
+    -- being set up is undone, so this color starts exactly as it was.
+    ready = true
+    if color[1] ~= r0 or color[2] ~= g0 or color[3] ~= b0 then
+        color[1], color[2], color[3], color[4] = r0, g0, b0, a0
+        onChange()
+    end
     -- Our window sits above a maximized map; keep the picker above our window.
     ColorPickerFrame:SetFrameStrata("FULLSCREEN_DIALOG")
     ColorPickerFrame:Raise()
@@ -963,8 +1008,9 @@ local function PickColor(color, onChange)
     extras.sync()
 end
 
--- `getColor` returns the saved { r, g, b } table the swatch edits.
-local function Swatch(parent, text, getColor)
+-- `getColor` returns the saved { r, g, b } table the swatch edits; `getDefault` (optional) its
+-- default, for the picker's Default button.
+local function Swatch(parent, text, getColor, getDefault)
     local b = CreateFrame("Button", nil, parent)
     local chip = Fill(b, "ARTWORK", 1, 1, 1)
     chip:SetSize(26, 14)
@@ -1018,9 +1064,10 @@ local function Swatch(parent, text, getColor)
             Sync()
             FN:Restyle()
             if FN.ColorsChanged then FN:ColorsChanged() end -- text shown in a profession's color
-        end)
+        end, getDefault)
     end)
     syncers[#syncers + 1] = Sync
+    b.Sync = Sync
     return b
 end
 
@@ -2625,7 +2672,7 @@ local function BuildNodesPage(page)
         local link = CreateFrame("Frame", nil, nodesPage.scroll.child)
         link:SetHeight(14)
         -- One line of text, so its spacing is the font's own; the button lies over the two words.
-        local WORDS = "Settings > Professions"
+        local WORDS = "Settings > Behavior Tweaks"
         local line = Label(link, "GameFontDisableSmall")
         line:SetPoint("CENTER")
         line:SetTextColor(0.33, 0.33, 0.33)
@@ -2728,11 +2775,42 @@ local function Section(column, key, title, height, onToggle)
         content:SetWidth(width - 2 * SECTION_INSET)
     end
 
+    -- What stays at the top of the list with the header while the open section scrolls
+    -- under it (Look & Feel's tabs): hung from the header, so it moves with it. Empty (and
+    -- hidden) unless a section fills it and sets `pinHeight`.
+    local pin = CreateFrame("Frame", nil, column)
+    pin:SetPoint("TOPLEFT", header, "BOTTOMLEFT")
+    pin:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT")
+    pin:SetHeight(1)
+    section.pin, section.pinHeight, section.pinned = pin, 0, 0
+    -- Behind the header and its strip while they are held at the top, so the settings
+    -- scrolling under them don't show through.
+    local back = CreateFrame("Frame", nil, column)
+    back:SetPoint("TOPLEFT", header, "TOPLEFT")
+    back:SetPoint("BOTTOMRIGHT", pin, "BOTTOMRIGHT")
+    local backHead = ToneTexture(back:CreateTexture(nil, "BACKGROUND"), "backHead")
+    backHead:SetPoint("TOPLEFT", header, "TOPLEFT")
+    backHead:SetPoint("BOTTOMRIGHT", header, "BOTTOMRIGHT")
+    local backStrip = ToneTexture(back:CreateTexture(nil, "BACKGROUND"), "back")
+    backStrip:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 1, 0)
+    backStrip:SetPoint("BOTTOMRIGHT", pin, "BOTTOMRIGHT", -1, 0)
+    back:EnableMouse(true) -- (the settings hidden under it can't be clicked through it)
+    back:Hide()
+    -- Over the section's contents: the backing, then the strip, then the header. (Set again
+    -- whenever it pins: the panel moving between layers can flatten these.)
+    local function Raise()
+        local base = column:GetFrameLevel()
+        back:SetFrameLevel(base + 40)
+        pin:SetFrameLevel(base + 41)
+        header:SetFrameLevel(base + 42)
+    end
+    Raise()
+
     -- A thin border in the header bar's color around an open section's contents,
-    -- hanging from the header (which is its top).
+    -- under the header (which is its top). Placed by StackSections.
     local box = CreateFrame("Frame", nil, column)
-    box:SetPoint("TOPLEFT", header, "BOTTOMLEFT")
-    box:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT")
+    box:SetWidth(SECTION_WIDTH)
+    sectionWidthFollowers[#sectionWidthFollowers + 1] = function(width) box:SetWidth(width) end
     local edges = Outline(box, box, 1, 1, 1, 1)
     for _, edge in ipairs(edges) do ToneTexture(edge, "line") end
     edges[1]:Hide() -- the header is the top edge
@@ -2748,6 +2826,7 @@ local function Section(column, key, title, height, onToggle)
         local collapsed = self:IsCollapsed()
         content:SetShown(not collapsed)
         box:SetShown(not collapsed)
+        pin:SetShown(not collapsed and self.pinHeight > 0)
         if self.crossbar then
             -- Stock: drawn bars; the upright only on the +.
             self.crossbar:Show()
@@ -2760,35 +2839,67 @@ local function Section(column, key, title, height, onToggle)
         FN.db.collapsed[key] = (not section:IsCollapsed()) or nil
         onToggle(section)
     end)
+    -- Holds the header (and its strip) `delta` lower than its place in the list: at the top of
+    -- the list's view while the open section scrolls under it.
+    function section:Pin(delta)
+        delta = math.max(0, math.floor((delta or 0) + 0.5))
+        if delta > 0 and back:GetFrameLevel() < column:GetFrameLevel() + 40 then Raise() end
+        if delta == self.pinned then return end
+        self.pinned = delta
+        header:ClearAllPoints()
+        header:SetPoint("TOPLEFT", column, "TOPLEFT", 0, (self.headerY or 0) - delta)
+        back:SetShown(delta > 0)
+    end
     return section
 end
 
--- Stacks sections down `column`; returns the height they take.
-local function StackSections(column, sections)
+-- Stacks sections down `column`; returns the height they take. Each remembers where its
+-- header is (headerY) and where it ends (bottomY), for pinning while the list scrolls. An open
+-- section gets a little more room under it, unless it is the very last one (`lastColumn`).
+local OPEN_GAP = 8
+local function StackSections(column, sections, lastColumn)
     local y = 0
-    for _, section in ipairs(sections) do
+    for i, section in ipairs(sections) do
+        section.pinned = nil -- (set again by the next pin update, which also hides the backing)
+        section.headerY = y
         section.header:ClearAllPoints()
         section.header:SetPoint("TOPLEFT", column, "TOPLEFT", 0, y)
         section:Paint()
         y = y - SECTION_HEADER
         if not section:IsCollapsed() then
-            -- An open section gets the same padding above and below its contents.
+            -- Its pinned strip (if any) under the header, then the same padding above and below
+            -- its contents, all inside its border.
+            local pinH = section.pinHeight or 0
+            section.pin:SetHeight(math.max(pinH, 0.1))
+            section.box:ClearAllPoints()
+            section.box:SetPoint("TOPLEFT", column, "TOPLEFT", 0, y)
+            section.box:SetHeight(pinH + SECTION_PAD + section.height + SECTION_PAD)
             section.content:ClearAllPoints()
-            section.content:SetPoint("TOPLEFT", column, "TOPLEFT", SECTION_INSET, y - SECTION_PAD)
+            section.content:SetPoint("TOPLEFT", column, "TOPLEFT", SECTION_INSET, y - pinH - SECTION_PAD)
             section.content:SetHeight(section.height)
-            section.box:SetHeight(SECTION_PAD + section.height + SECTION_PAD)
-            y = y - SECTION_PAD - section.height - SECTION_PAD
+            y = y - pinH - SECTION_PAD - section.height - SECTION_PAD
         end
+        section.bottomY = y
         y = y - SECTION_GAP -- the same gap between every pair of headers
+        if not section:IsCollapsed() and not (lastColumn and i == #sections) then y = y - OPEN_GAP end
     end
     return math.max(1, -y)
 end
 
 local function BuildSettingsPage(columnA, columnB)
     local db = FN.db
+    -- Look & Feel's spacing, built on one unit (LOOK_PAD): a gold title sits that far from the
+    -- section's edge and from the line above it, the last setting of a part ends that far above the
+    -- next line, and the settings under a title sit twice that far in from both edges. Settings in
+    -- a part are LOOK_GAP apart. (Positions inside the section's contents, which start SECTION_INSET
+    -- in from its border.)
+    local LOOK_PAD, LOOK_GAP = 12, 10
+    local LOOK_TITLE_H = 14 -- a gold title's line of text
+    local LOOK_TITLE_X = LOOK_PAD - SECTION_INSET
+    local LOOK_IND = 2 * LOOK_PAD - SECTION_INSET
     -- Every section starts closed at each login or reload, so the whole list shows at a glance;
     -- while playing, the one left open stays open (closing and reopening the map keeps it).
-    db.collapsed = { maps = true, colors = true, tooltips = true, nearby = true, lists = true, window = true }
+    db.collapsed = { look = true, colors = true, tooltips = true, window = true }
     db.sectionsClosed122, db.tooltipsFolded = nil, nil -- no longer needed
 
     local function Bool(key, refresh)
@@ -2807,18 +2918,134 @@ local function BuildSettingsPage(columnA, columnB)
         for i = 1, #syncers do syncers[i]() end
     end
 
+    -- The three profession color swatches on one line, spread out evenly. Several sets show
+    -- in different places; all edit the same colors and repaint together (FN:ColorsChanged).
+    local profSwatchSets = {}
+    local KIND_WORD = { herb = "Herbs", ore = "Mining", fish = "Fishing" }
+    local function ProfSwatches(parent)
+        local holder = CreateFrame("Frame", nil, parent)
+        holder:SetHeight(20)
+        local list = {}
+        for i, kind in ipairs(FN.kinds) do
+            list[i] = Swatch(holder, KIND_WORD[kind], function() return db.colors[kind] end,
+                function() return FN.defaults.colors[kind] end)
+        end
+        -- Where the first swatch starts across `width`, and the gap between them.
+        function holder.FirstX(width)
+            local total = 0
+            for _, sw in ipairs(list) do total = total + sw:GetWidth() end
+            local gap = math.max(8, math.floor((width - total) / (#list + 1)))
+            return math.max(0, math.floor((width - total - gap * (#list - 1)) / 2)), gap
+        end
+        -- Places the line at `y` across `width`; returns where what follows it starts.
+        function holder.Place(y, width, shown, x)
+            holder:SetShown(shown ~= false)
+            if shown == false then return y end
+            holder:ClearAllPoints()
+            holder:SetPoint("TOPLEFT", parent, "TOPLEFT", x or 0, -y)
+            holder:SetWidth(width)
+            local x, gap = holder.FirstX(width)
+            for _, sw in ipairs(list) do
+                sw:ClearAllPoints()
+                sw:SetPoint("LEFT", holder, "LEFT", x, 0)
+                x = x + sw:GetWidth() + gap
+            end
+            return y + 20 + LOOK_GAP
+        end
+        function holder.Sync()
+            for _, sw in ipairs(list) do sw.Sync() end
+        end
+        profSwatchSets[#profSwatchSets + 1] = holder
+        return holder
+    end
+    -- The difficulty colors, as a key: each color and what it means for a skill-up, from grey
+    -- down to red. Shown only (not changeable yet); the same colors FN:DifficultyColor gives.
+    -- They look like the profession swatches and line up with the first of them (`profSet`), so
+    -- switching between the two choices doesn't move the first box or where the words start.
+    local DIFF_KEY = {
+        { 0.5, 0.5, 0.5, "No skill-up" }, { 0.25, 0.75, 0.25, "Rarely a skill-up" },
+        { 1, 1, 0, "Usually a skill-up" }, { 1, 0.5, 0.25, "Always a skill-up" },
+        { 1, 0.13, 0.13, "Too low to gather" },
+    }
+    local DIFF_ROW = 22
+    local function DiffSwatches(parent, profSet)
+        local holder = CreateFrame("Frame", nil, parent)
+        local chips = {}
+        for i, d in ipairs(DIFF_KEY) do
+            local chip = Fill(holder, "ARTWORK", d[1], d[2], d[3], 1)
+            chip:SetSize(26, 14)
+            for _, edge in ipairs(Outline(holder, chip, 1, 1, 1, 1)) do ToneTexture(edge, "swatch") end
+            local label = Label(holder, nil, d[4])
+            label:SetPoint("LEFT", chip, "RIGHT", 7, 0)
+            chips[i] = chip
+        end
+        -- One under another; returns where what follows it starts.
+        function holder.Place(y, width, shown, x)
+            holder:SetShown(shown ~= false)
+            if shown == false then return y end
+            holder:ClearAllPoints()
+            holder:SetPoint("TOPLEFT", parent, "TOPLEFT", (x or 0) + profSet.FirstX(width), -y)
+            holder:SetSize(width, #chips * DIFF_ROW)
+            for i, chip in ipairs(chips) do
+                chip:ClearAllPoints()
+                -- (centered in its row, as a swatch is in its 20px button)
+                chip:SetPoint("LEFT", holder, "TOPLEFT", 0, -((i - 1) * DIFF_ROW + 10))
+            end
+            return y + (#chips - 1) * DIFF_ROW + 20 + LOOK_GAP
+        end
+        return holder
+    end
+    -- Three choices in one row, splitting `width` evenly: Mode, and the color pickers.
+    local function PlaceRow(cards, keys, y, width, selected, shown, x, gap)
+        gap = gap or 4
+        local w = math.floor((width - gap * (#keys - 1)) / #keys)
+        for i, key in ipairs(keys) do
+            local card = cards[key]
+            card:SetShown(shown)
+            if shown then
+                card:SetWidth(w)
+                card:SetSelected(selected == key)
+                card:ClearAllPoints()
+                card:SetPoint("TOPLEFT", (x or 0) + (i - 1) * (w + gap), -y)
+            end
+        end
+    end
+
     -- Sections, top to bottom in each block. `Relayout(true)` also re-fits the window.
     local sectionsA, sectionsB = {}, {}
     local relayouting = false
     local function Relayout(refit)
         if relayouting then return end -- a fold closing while sections are restacked
         relayouting = true
-        COLUMN_A_HEIGHT = StackSections(columnA, sectionsA)
-        COLUMN_B_HEIGHT = StackSections(columnB, sectionsB)
+        COLUMN_A_HEIGHT = StackSections(columnA, sectionsA, false)
+        COLUMN_B_HEIGHT = StackSections(columnB, sectionsB, true)
         columnA:SetHeight(COLUMN_A_HEIGHT)
         columnB:SetHeight(COLUMN_B_HEIGHT)
         relayouting = false
         if refit and frame and frame:IsShown() then FN:UpdateDock() end
+        FN:UpdateSettingsPins()
+    end
+    -- The open section's header (and its pinned strip) stays at the top of the list's view
+    -- once it is scrolled up to there, until the section's own end comes up under it.
+    function FN:UpdateSettingsPins()
+        local child = columnA:GetParent()
+        local sf = child and child:GetParent()
+        local scroll = sf and sf.GetVerticalScroll and sf:GetVerticalScroll() or 0
+        local childTop = child and child:GetTop()
+        for _, set in ipairs({ { columnA, sectionsA }, { columnB, sectionsB } }) do
+            local column, list = set[1], set[2]
+            local columnTop = column:GetTop()
+            local offset = (childTop and columnTop) and (childTop - columnTop) or 0 -- the column, down the list
+            for _, section in ipairs(list) do
+                local delta = 0
+                if not section:IsCollapsed() and section.bottomY then
+                    local top = offset - section.headerY
+                    local room = (section.headerY - section.bottomY) - SECTION_HEADER - (section.pinHeight or 0)
+                    delta = math.min(math.max(0, scroll - top), math.max(0, room))
+                end
+                section:Pin(delta)
+            end
+        end
     end
     -- One section open at a time: opening one closes the rest.
     local function Toggled(opened)
@@ -2831,8 +3058,13 @@ local function BuildSettingsPage(columnA, columnB)
         end
         Relayout(true)
     end
-    -- Opens one section from elsewhere in the panel.
+    -- Opens one section from elsewhere in the panel. Older names lead to where their settings
+    -- went; a part inside a section can ask to be opened too (sectionOpeners).
+    local sectionOpeners = {}
+    local MOVED = { maps = "look", nearby = "look", lists = "colors" }
     function FN:OpenSettingsSection(key)
+        if sectionOpeners[key] then sectionOpeners[key]() end
+        key = MOVED[key] or key
         for _, list in ipairs({ sectionsA, sectionsB }) do
             for _, section in ipairs(list) do
                 db.collapsed[section.key] = section.key ~= key or nil
@@ -2846,11 +3078,60 @@ local function BuildSettingsPage(columnA, columnB)
         return section, section.content
     end
 
-    -- Maps ---------------------------------------------------------------------
-    -- The minimap and the world map each have their own settings; the switch picks
-    -- which map the controls below are showing and editing.
-    local maps, page = Add(sectionsA, columnA, "maps", "Maps & Icons", 164)
-    local editing = "minimap"
+    -- Look & Feel ---------------------------------------------------------------
+    -- (In its own block: the settings page has more parts than one function may name. What the
+    -- Nearby nodes part below needs from it is named out here.)
+    -- A gold title over a line across its whole section: the parts of a section. Every section
+    -- lays its parts out on the same spacing (LOOK_PAD, LOOK_GAP).
+    local function SubHead(parent, text, shift)
+        shift = shift or 0
+        local line = ToneLine(parent)
+        line:SetHeight(1)
+        local fs = Label(parent, "GameFontNormal", text)
+        local head = {}
+        -- Places it at `y` (or hides it); returns where what follows it starts.
+        function head.Place(y, shown, first)
+            line:SetShown(shown and not first)
+            fs:SetShown(shown)
+            if not shown then return y end
+            if first then -- the first title in a tab: `y` is already a unit under the tabs
+                fs:ClearAllPoints()
+                fs:SetPoint("TOPLEFT", LOOK_TITLE_X - shift, -y)
+                head.text = fs
+                return y + LOOK_TITLE_H + LOOK_PAD
+            end
+            -- The line a unit under the last setting, the title a unit under the line, and the
+            -- first setting a unit under the title.
+            local lineY = y - LOOK_GAP + LOOK_PAD
+            line:ClearAllPoints()
+            line:SetPoint("TOPLEFT", parent, "TOPLEFT", -SECTION_INSET - shift, -lineY)
+            line:SetPoint("TOPRIGHT", parent, "TOPRIGHT", SECTION_INSET + shift, -lineY)
+            fs:ClearAllPoints()
+            fs:SetPoint("TOPLEFT", LOOK_TITLE_X - shift, -(lineY + LOOK_PAD))
+            head.text = fs
+            return lineY + LOOK_PAD + LOOK_TITLE_H + LOOK_PAD
+        end
+        return head
+    end
+    -- A section's own width inside its border, following the section (wider when docked).
+    local sectionInner = SECTION_WIDTH - 2 * SECTION_INSET
+    sectionWidthFollowers[#sectionWidthFollowers + 1] = function(width)
+        sectionInner = width - 2 * SECTION_INSET
+    end
+    -- Where a section's first title goes: a unit under its header (the section itself leaves
+    -- SECTION_PAD above its contents), and how tall a section is that ends at `y`.
+    local SECTION_TOP = LOOK_PAD - SECTION_PAD
+    local function SectionHeight(y) return math.max(1, y - LOOK_GAP + LOOK_PAD - SECTION_PAD) end
+
+    local look, lookPage, PlaceLook, nearbyPage, nearby, PlacePreview, rangePage, PlaceRange
+    do
+    -- How nodes are drawn, in two folds: World Map and Minimap. Both start closed and only one is
+    -- open at a time; the open one is the map the icon controls below edit. The minimap's fold
+    -- also holds the nearby node marker. A node colors list follows whichever map uses it.
+    look, lookPage = Add(sectionsA, columnA, "look", "Look & Feel", 60)
+    local openPane = "world" -- the tab showing: "world", "minimap" or "nearby"
+    local editing = "world" -- the map the icon controls edit: follows the tab
+    local lookWidth = SECTION_WIDTH - 2 * SECTION_INSET -- follows the section (wider when docked)
     local function Look() return db.icons[editing] end
     local function LookNumber(key)
         return function() return Look()[key] end, function(v)
@@ -2858,31 +3139,134 @@ local function BuildSettingsPage(columnA, columnB)
             FN:Restyle()
         end
     end
-    -- One switch, like the sort control: "Minimap | World map", the active half lit.
-    local mapToggle = PairToggle(page, "Minimap", "World map", function()
-        editing = editing == "minimap" and "world" or "minimap"
-        ResyncAll()
-        Relayout(true) -- the minimap has more settings than the world map
-    end)
-    mapToggle:SetPoint("TOP", page, "TOP", 0, 0) -- centered in the section
 
-    -- Whether nodes show on the chosen map at all; its wording names that map.
-    local show = Check(page, "Show on minimap",
+    -- One switch at the top picks what the section shows: World Map, Minimap or Colors (the
+    -- profession colors). The map tabs set which map the shared icon controls edit.
+    -- Folder tabs across the top of the section: the picked one is outlined and open at the
+    -- bottom, running into what it holds; a line runs under the others.
+    local PANES = { "world", "minimap", "nearby" }
+    local TAB_NAMES = { "World Map", "Minimap", "Nearby" }
+    local TAB_H = 26
+    local TAB_GAP = 4 -- a little room between the section's header and its tabs
+    local TAB_EDGE = { GOLD[1], GOLD[2], GOLD[3], 0.45 }
+    local lookTabs = {}
+    for i, pane in ipairs(PANES) do
+        local t = CreateFrame("Button", nil, look.pin)
+        t:SetHeight(TAB_H)
+        t.bg = t:CreateTexture(nil, "BACKGROUND")
+        t.bg:SetAllPoints()
+        local hover = t:CreateTexture(nil, "HIGHLIGHT")
+        hover:SetAllPoints()
+        hover:SetColorTexture(1, 1, 1, 0.05)
+        t.edges = Outline(t, t, TAB_EDGE[1], TAB_EDGE[2], TAB_EDGE[3], TAB_EDGE[4])
+        t.edges[2]:Hide() -- no bottom: it opens into its settings
+        t.text = Label(t, "GameFontNormal", TAB_NAMES[i])
+        t.text:SetPoint("CENTER", 0, -1)
+        t:SetScript("OnEnter", function()
+            if openPane ~= pane then t.text:SetTextColor(1, 1, 1) end
+        end)
+        t:SetScript("OnLeave", function()
+            if openPane ~= pane then t.text:SetTextColor(0.55, 0.55, 0.55) end
+        end)
+        t:SetScript("OnClick", function()
+            openPane = pane
+            if pane == "world" or pane == "minimap" then editing = pane end
+            ResyncAll()
+            Relayout(true)
+        end)
+        lookTabs[i] = t
+    end
+    local tabBaseL = Fill(look.pin, "BORDER", TAB_EDGE[1], TAB_EDGE[2], TAB_EDGE[3], TAB_EDGE[4])
+    local tabBaseR = Fill(look.pin, "BORDER", TAB_EDGE[1], TAB_EDGE[2], TAB_EDGE[3], TAB_EDGE[4])
+    tabBaseL:SetHeight(1)
+    tabBaseR:SetHeight(1)
+    -- The style picker's "Custom" opens the settings at the nearby node marker.
+    sectionOpeners.nearby = function()
+        openPane = "nearby"
+        ResyncAll()
+    end
+
+    -- A gold heading inside a fold, under a line across the whole section.
+
+    -- The icon controls, shared by both maps: shown under whichever fold is open.
+    page = CreateFrame("Frame", nil, lookPage)
+    local iconsPage = page
+    local maps = { height = 1 }
+    local LayoutMaps -- set below
+
+    -- Whether nodes show on the open map at all; its wording names that map.
+    local show = Check(page, "Enable minimap icons",
         function() return db[editing == "minimap" and "minimap" or "worldmap"] end,
         function(v)
             db[editing == "minimap" and "minimap" or "worldmap"] = v and true or false
             FN:Refresh()
         end)
-    show:SetPoint("TOPLEFT", 0, -30)
     syncers[#syncers + 1] = function()
-        mapToggle:SetRight(editing == "world")
-        show:SetLabel(editing == "minimap" and "Show on minimap" or "Show on world map")
+        show:SetLabel(editing == "minimap" and "Enable |cffffd100minimap|r icons"
+            or "Enable |cffffd100world map|r icons")
     end
 
-    local zoom = Slider(page, "Circular icon zoom", 1, 2.5, 0.05, "%.2fx", LookNumber("zoom"))
+    -- World map: Normal (icons), Dot (small colored dots) or Dynamic (dots zoomed out, growing
+    -- into icons as the map is zoomed in).
+    local modeHead = SubHead(page, "Mode")
+    local MODES = { "normal", "dot", "dynamic" }
+    local modeCards = {}
+    for _, choice in ipairs({ { "normal", "Normal" }, { "dot", "Dot" }, { "dynamic", "Dynamic" } }) do
+        local card = Card(page, choice[2], 60, 22, function()
+            if FN.openMapOn and db.openMapDynamic then return end -- set by OpenMap (see its tick box)
+            db[FN:WorldModeKey()] = choice[1] -- with OpenMap and without are kept apart
+            ResyncAll()
+            Relayout(true)
+            FN:Restyle()
+        end)
+        modeCards[choice[1]] = card
+    end
+    local MODE_HINT = {
+        normal = "Node icons at a fixed size",
+        dot = "Small dots, colored below",
+        dynamic = "Dots zoomed out, icons zoomed in",
+    }
+    local modeHint = Label(page, "GameFontDisableSmall", "")
+    modeHint:SetJustifyH("CENTER")
+    if modeHint.SetWordWrap then modeHint:SetWordWrap(true) end
+    -- With OpenMap: Dynamic by default (its zoomable map suits it); unticked, the mode above is used.
+    local integrations = Label(page, "GameFontDisableSmall", "Integrations")
+    local openMapCheck = Check(page, "|cffffd100OpenMap:|r Auto-enable |cffffd100Dynamic|r",
+        function() return db.openMapDynamic end,
+        function(v)
+            db.openMapDynamic = v and true or false
+            ResyncAll()
+            Relayout(true)
+            FN:Restyle()
+        end)
 
-    -- Minimap only: its shape (where icons stop at the edge) and how far out they draw.
-    local shapeLabel = Label(page, nil, "Shape")
+    local generalHead = SubHead(page, "General")
+    local shapeHead = SubHead(page, "Shape & Size")
+    local roundCheck = Check(page, "Circular icons (crop to look cleaner)",
+        function() return Look().round end,
+        function(v)
+            Look().round = v and true or false
+            LayoutMaps()
+            Relayout(true)
+            FN:Restyle()
+        end)
+    local sizeSlider = Slider(page, "Icon size", 1, 32, 1, "%d", LookNumber("size"))
+    local zoom = Slider(page, "Circular icon zoom", 1, 2.5, 0.05, "%.2fx", LookNumber("zoom"))
+    local dotSize = Slider(page, "Dot size", 1, 16, 1, "%d", Number("worldDotSize"))
+    local dotBorder = Check(page, "Dark border",
+        function() return db.worldDotBorder end,
+        function(v)
+            db.worldDotBorder = v and true or false
+            FN:Restyle()
+        end)
+    local dynHint = Label(page, "GameFontDisableSmall", "Dots and icons are sized from the map's zoom.")
+    dynHint:SetJustifyH("LEFT")
+    if dynHint.SetWordWrap then dynHint:SetWordWrap(true) end
+
+    -- Minimap only: how far out icons draw, and its shape (where icons stop at the edge).
+    local edge = Slider(page, "Draw range", 50, 125, 1, "%d%%", Number("minimapEdge"))
+    local minimapShapeHead = SubHead(page, "Minimap Shape")
+    local SHAPES = { "auto", "round", "square" }
     local shapeCards = {}
     for i, choice in ipairs({ "auto", "round", "square" }) do
         local card = Card(page, choice == "auto" and "Auto" or choice == "round" and "Round" or "Square", 54, 22,
@@ -2891,228 +3275,607 @@ local function BuildSettingsPage(columnA, columnB)
                 ResyncAll()
                 Relayout(true)
             end)
-        card.offset = 62 + (i - 1) * 58
         shapeCards[choice] = card
     end
     local detected = Label(page, "GameFontDisableSmall", "")
-    local edge = Slider(page, "Draw range", 50, 125, 1, "%d%%", Number("minimapEdge"))
-    -- The minimap-only part: a line across the section in its border's color, and under it
-    -- "Advanced", which opens and closes the controls below it (closed by default).
-    local miniLine = ToneLine(page)
-    miniLine:SetHeight(1)
-    local advanced = CreateFrame("Button", nil, page)
-    advanced:SetSize(220, 20) -- the clickable area covers the whole label
-    local advancedText = Label(advanced, "GameFontDisable", "Advanced Minimap Settings") -- grey; gold on hover
-    advancedText:SetPoint("CENTER")
-    SideLines(advanced, advancedText)
-    advanced:SetScript("OnEnter", function() advancedText:SetTextColor(GOLD[1], GOLD[2], GOLD[3]) end)
-    advanced:SetScript("OnLeave", function() advancedText:SetTextColor(0.5, 0.5, 0.5) end)
-    -- `page` is reused for the sections that follow; the layout below needs this one.
-    local iconsPage = page
-    -- Open or not is not saved: Advanced starts closed every time the Icons section
-    -- (or the window) is shown again, and after a reload.
-    local advancedOpen = false
-    db.advancedOpen = nil -- briefly saved by an earlier version; no longer used
 
-    -- World map only: how nodes look there. Normal (icons), Dot (small colored dots) or Dynamic
-    -- (dots zoomed out, growing into icons as the map is zoomed in).
-    local LayoutMaps -- set below
-    -- With OpenMap: dynamic by default (its zoomable map suits it); unticked, the mode below is used.
-    local openMapCheck = Check(page, "Auto-set Dynamic mode for OpenMap",
-        function() return db.openMapDynamic end,
-        function(v)
-            db.openMapDynamic = v and true or false
-            ResyncAll()
-            Relayout(true)
-            FN:Restyle()
-        end)
-    local modeLabel = Label(page, nil, "Mode")
-    local modeCards = {}
-    for i, choice in ipairs({ { "normal", "Normal" }, { "dot", "Dot" }, { "dynamic", "Dynamic" } }) do
-        local card = Card(page, choice[2], 60, 22, function()
-            if FN.openMapOn and db.openMapDynamic then return end -- set by OpenMap (see the tick box)
-            db[FN:WorldModeKey()] = choice[1] -- with OpenMap and without are kept apart
-            ResyncAll()
-            Relayout(true)
-            FN:Restyle()
-        end)
-        card.offset = 46 + (i - 1) * 64
-        modeCards[choice[1]] = card
-    end
-    -- Under it, a line across the section: what follows belongs to the mode picked above it.
-    local modeLine = ToneLine(page)
-    modeLine:SetHeight(1)
-    local dotColorLabel = Label(page, nil, "Dot color")
+    -- World map dots (Dot mode, and Dynamic's zoomed-out dots): what colors them.
+    local colorHead = SubHead(page, "Colors")
+    local DOT_COLORS = { { "prof", "Profession" }, { "difficulty", "Difficulty" }, { "node", "Node type" },
+        { "custom", "Custom" } }
     local dotColorCards = {}
-    for i, choice in ipairs({ { "prof", "Profession" }, { "difficulty", "Difficulty" } }) do
-        local card = Card(page, choice[2], 80, 22, function()
+    for _, choice in ipairs(DOT_COLORS) do
+        dotColorCards[choice[1]] = Card(page, choice[2], 74, 22, function()
             db.worldDotColor = choice[1]
             ResyncAll()
+            Relayout(true)
             FN:Restyle()
         end)
-        card.offset = 70 + (i - 1) * 86
-        dotColorCards[choice[1]] = card
     end
+    local DOT_KEYS = { "prof", "difficulty", "node", "custom" }
+    local worldProfHead = SubHead(page, "Profession Colors")
+    local worldProfColors = ProfSwatches(page)
+    local worldDiffHead = SubHead(page, "Difficulty Colors")
+    local worldDiffColors = DiffSwatches(page, worldProfColors)
+    local worldCustomHead = SubHead(page, "Custom Color")
+    local worldCustom = Swatch(page, "Custom color for |cffffd100world map|r dots",
+        function() return db.worldDotCustom end, function() return FN.defaults.worldDotCustom end)
+    local DOT_HINT = {
+        prof = "Each profession's own color",
+        difficulty = "Colored by your skill, like recipes",
+        node = "Each node type's own color",
+        custom = "One color for every dot",
+    }
     local dotHint = Label(page, "GameFontDisableSmall", "")
-    local dotSize = Slider(page, "Dot size", 1, 16, 1, "%d", Number("worldDotSize"))
-    local dotBorder = Check(page, "Dark border",
-        function() return db.worldDotBorder end,
-        function(v)
-            db.worldDotBorder = v and true or false
-            FN:Restyle()
-        end)
-    -- Dynamic: no settings of its own (fixed sizes), only what it does.
-    local dynHint = Label(page, "GameFontDisableSmall",
-        "Small dots while zoomed out. Zoomed into a zone, icons that grow as you zoom further in.")
-    dynHint:SetJustifyH("LEFT")
-    if dynHint.SetWordWrap then dynHint:SetWordWrap(true) end
-    local roundCheck, sizeSlider -- made below; placed by LayoutMaps
+    dotHint:SetJustifyH("CENTER")
+    if dotHint.SetWordWrap then dotHint:SetWordWrap(true) end
 
-    -- Lays out what the chosen map shows: no empty space for hidden controls.
+    -- Lays out what the open map shows: no empty space for hidden controls.
     LayoutMaps = function()
-        local y = 54
+        local width = lookWidth - 2 * LOOK_IND -- (in from both sides)
+        local IND, GAP = LOOK_IND, LOOK_GAP
         local world = editing == "world"
+        local mini = not world
         local mode = world and FN:WorldMode() or "normal"
         local dots, dynamicMode = mode == "dot", mode == "dynamic"
-        -- OpenMap in use: its tick box first; while ticked, the mode is locked to Dynamic.
+        local y
+        -- Places a setting `height` tall at the current spot; the next one goes a gap under it.
+        local function At(f, height, x)
+            f:ClearAllPoints()
+            f:SetPoint("TOPLEFT", x or IND, -y)
+            y = y + height + GAP
+        end
+        local function Text(fs, text)
+            fs:SetText(text)
+            fs:SetWidth(width)
+            At(fs, math.ceil(fs:GetStringHeight()))
+        end
+        local function Sized(slider)
+            slider:SetWidth(width)
+            At(slider, 34)
+        end
+
+        y = generalHead.Place(0, true, true)
+        At(show, 20)
+
+        -- World map: the mode, then OpenMap's say in it.
         local openMap = world and FN.openMapOn
         local auto = openMap and db.openMapDynamic
-        openMapCheck:SetShown(openMap)
-        if openMap then
-            openMapCheck:SetPoint("TOPLEFT", 0, -y)
-            y = y + 26
-        end
-        modeLabel:SetShown(world)
-        modeLine:SetShown(world)
-        for _, card in pairs(modeCards) do card:SetShown(world) end
+        modeHint:SetShown(world)
+        y = modeHead.Place(y, world)
+        PlaceRow(modeCards, MODES, y, width, mode, world, IND, 6)
         if world then
-            modeLabel:SetPoint("TOPLEFT", 0, -(y + 5))
-            modeLabel:SetAlpha(auto and 0.4 or 1)
-            for key, card in pairs(modeCards) do
-                card:SetSelected(mode == key)
-                card:SetPoint("TOPLEFT", card.offset, -y)
+            for _, card in pairs(modeCards) do
                 card:SetAlpha(auto and 0.4 or 1)
                 card:EnableMouse(not auto)
             end
-            y = y + 32
-            -- The line runs border to border (the contents are inset from the section's edge).
-            modeLine:ClearAllPoints()
-            modeLine:SetPoint("TOPLEFT", iconsPage, "TOPLEFT", -SECTION_INSET, -y)
-            modeLine:SetPoint("TOPRIGHT", iconsPage, "TOPRIGHT", SECTION_INSET, -y)
-            y = y + 10
+            y = y + 22 + GAP
+            Text(modeHint, auto and "Set by OpenMap (untick it below to choose)" or MODE_HINT[mode])
         end
-        -- Dot: their color, size and border.
-        dotColorLabel:SetShown(dots)
-        dotHint:SetShown(dots)
+        integrations:SetShown(openMap)
+        openMapCheck:SetShown(openMap)
+        if openMap then
+            -- (its label sits close over its tick box)
+            integrations:ClearAllPoints()
+            integrations:SetPoint("TOPLEFT", IND, -y)
+            y = y + math.ceil(integrations:GetStringHeight()) + 6
+            At(openMapCheck, 20, IND + 12)
+        end
+
+        -- Shape & Size: icons (Normal, Dynamic's icons, the minimap), or Dot mode's dots.
+        y = shapeHead.Place(y, true)
+        dynHint:SetShown(dynamicMode)
+        if dynamicMode then Text(dynHint, dynHint:GetText()) end
         dotSize:SetShown(dots)
         dotBorder:SetShown(dots)
-        for _, card in pairs(dotColorCards) do card:SetShown(dots) end
         if dots then
-            dotColorLabel:SetPoint("TOPLEFT", 0, -(y + 5))
-            for key, card in pairs(dotColorCards) do
-                card:SetSelected(db.worldDotColor == key)
-                card:SetPoint("TOPLEFT", card.offset, -y)
-            end
-            dotHint:SetText(db.worldDotColor == "difficulty"
-                and "Orange, yellow, green or grey for your skill, like recipes"
-                or "Each profession's own color (Settings > Professions)")
-            dotHint:SetPoint("TOPLEFT", dotColorCards.prof, "BOTTOMLEFT", 0, -4)
-            y = y + 44
-            dotSize:SetPoint("TOPLEFT", 0, -y)
-            y = y + 44
-            dotBorder:SetPoint("TOPLEFT", 0, -y)
-            y = y + 30
+            Sized(dotSize)
+            At(dotBorder, 20)
         end
-        -- Dynamic: the two sizes, then (below) the icons' round setting.
-        dynHint:SetShown(dynamicMode)
-        if dynamicMode then
-            dynHint:SetWidth(iconsPage:GetWidth() > 0 and iconsPage:GetWidth() or 220)
-            dynHint:SetPoint("TOPLEFT", 0, -y)
-            y = y + math.ceil(dynHint:GetStringHeight()) + 10
-        end
-        -- Icons (Normal, and Dynamic's icons): round or not, their size, and the zoom of round ones.
         roundCheck:SetShown(not dots)
         sizeSlider:SetShown(not dots and not dynamicMode)
+        if not dots then
+            At(roundCheck, 20)
+            if not dynamicMode then Sized(sizeSlider) end
+        end
         local round = not dots and Look().round
         zoom:SetShown(round) -- only meaningful for circular icons
-        if not dots then
-            roundCheck:SetPoint("TOPLEFT", 0, -y)
-            y = y + 30
-            if not dynamicMode then
-                sizeSlider:SetPoint("TOPLEFT", 0, -y)
-                y = y + 44
-            end
-        end
-        if round then
-            zoom:SetPoint("TOPLEFT", 0, -y)
-            y = y + 44
-        end
-        local mini = editing == "minimap"
-        local open = mini and advancedOpen
-        miniLine:SetShown(mini)
-        advanced:SetShown(mini)
-        shapeLabel:SetShown(open)
-        detected:SetShown(open)
-        edge:SetShown(open)
-        for _, card in pairs(shapeCards) do card:SetShown(open) end
+        if round then Sized(zoom) end
+        edge:SetShown(mini)
+        detected:SetShown(mini)
+        if mini then Sized(edge) end
+
+        -- Minimap Shape: where icons stop at the minimap's edge.
+        y = minimapShapeHead.Place(y, mini)
+        PlaceRow(shapeCards, SHAPES, y, width, db.minimapShape, mini, IND, 6)
         if mini then
-            -- The line runs border to border (the contents are inset from the section's edge).
-            miniLine:ClearAllPoints()
-            miniLine:SetPoint("TOPLEFT", iconsPage, "TOPLEFT", -SECTION_INSET, -(y - 2))
-            miniLine:SetPoint("TOPRIGHT", iconsPage, "TOPRIGHT", SECTION_INSET, -(y - 2))
-            advanced:SetPoint("TOP", iconsPage, "TOP", 0, -(y + 3)) -- centered across, and level between the line and the border
-            y = y + (open and 32 or 30)
-        end
-        if open then
-            -- Draw range first, then the shape.
-            edge:SetPoint("TOPLEFT", 0, -y)
-            y = y + 44
-            for choice, card in pairs(shapeCards) do
-                card:SetSelected(db.minimapShape == choice)
-                card:SetPoint("TOPLEFT", card.offset, -y)
-            end
-            shapeLabel:SetPoint("TOPLEFT", 0, -(y + 5))
+            -- What was found, at the right on its title's line.
             local name = FN:DetectedMinimapShape()
             detected:SetText("Detected: " .. (name == "ROUND" and "round" or name == "SQUARE" and "square" or name:lower()))
-            detected:SetPoint("TOPLEFT", shapeCards.auto, "BOTTOMLEFT", 0, -4)
-            y = y + 46
+            detected:ClearAllPoints()
+            detected:SetPoint("TOPRIGHT", iconsPage, "TOPRIGHT", -IND, -(y - LOOK_PAD - LOOK_TITLE_H + 2))
+            y = y + 22 + GAP
         end
-        maps.height = y - 10
+
+        -- Colors: world map dots only (Normal mode draws icons).
+        local colored = world and not (mode == "normal")
+        y = colorHead.Place(y, colored)
+        dotHint:SetShown(colored)
+        PlaceRow(dotColorCards, DOT_KEYS, y, width, db.worldDotColor, colored, IND, 6)
+        if colored then
+            y = y + 22 + GAP
+            Text(dotHint, DOT_HINT[db.worldDotColor] or DOT_HINT.prof)
+        end
+        -- The chosen color's own section (Node type's list is placed after this, by PlaceLook).
+        local pick = colored and db.worldDotColor
+        y = worldProfHead.Place(y, pick == "prof")
+        y = worldProfColors.Place(y, width, pick == "prof", IND)
+        y = worldDiffHead.Place(y, pick == "difficulty")
+        y = worldDiffColors.Place(y, width, pick == "difficulty", IND)
+        y = worldCustomHead.Place(y, pick == "custom")
+        worldCustom:SetShown(pick == "custom")
+        if pick == "custom" then
+            -- (lined up with the first profession swatch, like the difficulty key)
+            worldCustom:ClearAllPoints()
+            worldCustom:SetPoint("TOPLEFT", iconsPage, "TOPLEFT", IND + worldProfColors.FirstX(width), -y)
+            y = y + 20 + GAP
+        end
+        maps.height = y
+        if PlaceLook then PlaceLook() end
     end
-    advanced:SetScript("OnClick", function()
-        advancedOpen = not advancedOpen
-        LayoutMaps()
-        Relayout(true)
-    end)
-    -- Hidden (the Icons section closed, or the window or panel closed): close it again.
-    iconsPage:HookScript("OnHide", function()
-        if advancedOpen then
-            advancedOpen = false
-            LayoutMaps()
-            Relayout(false) -- or its room stays open below it
-        end
-    end)
-    roundCheck = Check(page, "Circular Icons (crop to look cleaner)",
-        function() return Look().round end,
-        function(v)
-            Look().round = v and true or false
-            LayoutMaps()
-            Relayout(true)
-            FN:Restyle()
-        end)
-    sizeSlider = Slider(page, "Icon size", 1, 32, 1, "%d", LookNumber("size"))
     syncers[#syncers + 1] = LayoutMaps
 
-    -- Colors -------------------------------------------------------------------
-    -- Professions: each one's color, what shows when, and (folded) how the lists look.
+    -- Node colors: every herb, ore and pool with its color, in one fold per profession. Shown
+    -- under the world map's Colors when dots are colored by node type, and under the nearby
+    -- marker when a part of it is. Picking a color saves it (Reset forgets every pick).
+    local nodeList = CreateFrame("Frame", nil, lookPage)
+    nodeList.height = 1
+    local KIND_TITLE = { herb = "Herbs", ore = "Ores", fish = "Fish Pools" }
+    local NODE_ROW = 17
+    local groupOpen = {}
+    local groupHeads, nodeSwatches = {}, {}
+    local function GroupHead(kind)
+        local b = CreateFrame("Button", nil, nodeList)
+        b:SetHeight(20)
+        local hover = b:CreateTexture(nil, "HIGHLIGHT")
+        hover:SetAllPoints()
+        hover:SetColorTexture(1, 1, 1, 0.05)
+        b.name = Label(b, "GameFontHighlight", KIND_TITLE[kind] or kind)
+        b.name:SetPoint("LEFT", 2, 0)
+        b.count = Label(b, "GameFontDisableSmall", "")
+        b.count:SetPoint("RIGHT", -2, 0)
+        local under = ToneLine(b)
+        under:SetHeight(1)
+        under:SetPoint("BOTTOMLEFT")
+        under:SetPoint("BOTTOMRIGHT")
+        b:SetScript("OnClick", function()
+            groupOpen[kind] = not groupOpen[kind] or nil
+            ResyncAll()
+            Relayout(true)
+        end)
+        return b
+    end
+    -- A name cut short by its column shows in full while hovered: the same text, in the same
+    -- place and font, in a box just big enough for it, over whatever is beside it.
+    local nameTip = CreateFrame("Frame", nil, nodeList)
+    nameTip:SetFrameLevel(nodeList:GetFrameLevel() + 30)
+    ToneTexture(nameTip:CreateTexture(nil, "BACKGROUND"), "back"):SetAllPoints()
+    Outline(nameTip, nameTip, GOLD[1], GOLD[2], GOLD[3], 0.35)
+    local nameTipText = nameTip:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    nameTip:Hide()
+    local function RevealName(fs, text)
+        local full = fs.GetUnboundedStringWidth and fs:GetUnboundedStringWidth() or fs:GetStringWidth()
+        if full <= fs:GetWidth() + 0.5 then return end -- (it all fits)
+        nameTipText:SetText(text)
+        nameTipText:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+        nameTipText:ClearAllPoints()
+        nameTipText:SetPoint("LEFT", fs, "LEFT", 0, 0)
+        nameTip:ClearAllPoints()
+        nameTip:SetPoint("TOPLEFT", nameTipText, "TOPLEFT", -3, 2)
+        nameTip:SetPoint("BOTTOMRIGHT", nameTipText, "BOTTOMRIGHT", 3, -2)
+        nameTip:SetFrameLevel(nodeList:GetFrameLevel() + 30) -- (over the names beside it)
+        nameTip:Show()
+    end
+    local pickedNode -- the node whose color the picker is open on
+    -- A node left at its own default (Default clicked) forgets its saved pick, so it follows the
+    -- default again (a later update may change it). Done as its edit ends.
+    local function ForgetIfDefault(node)
+        local saved, own = node and db.nodeColors[node.key], node and FN.NODE_COLORS[node.key]
+        if saved and own and math.abs(saved[1] - own[1]) < 0.002 and math.abs(saved[2] - own[2]) < 0.002
+            and math.abs(saved[3] - own[3]) < 0.002 then
+            db.nodeColors[node.key] = nil
+        end
+    end
+    local function NodeSwatch(node)
+        local b = CreateFrame("Button", nil, nodeList)
+        b:SetHeight(NODE_ROW)
+        local chip = Fill(b, "ARTWORK", 1, 1, 1)
+        chip:SetSize(10, 10)
+        chip:SetPoint("LEFT", 1, 0)
+        for _, e in ipairs(Outline(b, chip, 1, 1, 1, 1)) do ToneTexture(e, "swatch") end
+        local fs = Label(b, "GameFontHighlightSmall", node.name)
+        fs:SetPoint("LEFT", chip, "RIGHT", 6, 0)
+        fs:SetPoint("RIGHT", b, "RIGHT", -2, 0)
+        fs:SetJustifyH("LEFT")
+        if fs.SetWordWrap then fs:SetWordWrap(false) end
+        function b.Sync()
+            local c = FN:NodeColor(node)
+            chip:SetColorTexture(c[1], c[2], c[3], 1)
+        end
+        b:SetScript("OnEnter", function()
+            fs:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+            RevealName(fs, node.name)
+        end)
+        b:SetScript("OnLeave", function()
+            fs:SetTextColor(1, 1, 1)
+            nameTip:Hide()
+        end)
+        b:HookScript("OnHide", function() nameTip:Hide() end)
+        b:SetScript("OnClick", function()
+            ForgetIfDefault(pickedNode) -- (the edit before, if the picker was still open on it)
+            pickedNode = node
+            PickColor(FN:EditNodeColor(node), function()
+                b.Sync()
+                FN:Restyle()
+                if FN.MarkerPreview then FN:MarkerPreview() end
+            end, function() return FN.NODE_COLORS[node.key] or db.colors[node.kind] end)
+        end)
+        return b
+    end
+    ColorPickerFrame:HookScript("OnHide", function()
+        ForgetIfDefault(pickedNode)
+        pickedNode = nil
+    end)
+    -- Reset asks first, in a small box of its own over the button (not the game's popups,
+    -- which an addon can leave tainted for the game's own uses).
+    -- (on the panel, so it shares its scale; over everything in it)
+    local confirm = CreateFrame("Frame", nil, frame or UIParent)
+    confirm:SetFrameStrata("FULLSCREEN_DIALOG")
+    confirm:SetSize(250, 96)
+    confirm:EnableMouse(true)
+    confirm:Hide()
+    -- (the darker brown, so it stands apart from the section under it)
+    ToneTexture(confirm:CreateTexture(nil, "BACKGROUND"), "strip"):SetAllPoints()
+    Outline(confirm, confirm, GOLD[1], GOLD[2], GOLD[3], 0.45)
+    local ask = Label(confirm, "GameFontHighlight", "")
+    ask:SetPoint("TOP", 0, -LOOK_PAD)
+    local askNote = Label(confirm, "GameFontDisableSmall", "The colors you picked go back to their defaults.")
+    askNote:SetJustifyH("CENTER")
+    if askNote.SetWordWrap then askNote:SetWordWrap(true) end
+    askNote:SetPoint("TOP", ask, "BOTTOM", 0, -4)
+    local resetColors
+    local resetKind -- what the box is asking about: "herb", "ore", "fish" or "all"
+    -- The question, with what is being reset in its profession's color (ALL in red).
+    local function Question(kind)
+        local function Hex(c) return ("|cff%02x%02x%02x"):format(c[1] * 255, c[2] * 255, c[3] * 255) end
+        if kind == "all" then return "Reset |cffff4040ALL|r node colors?" end
+        local word = kind == "herb" and "herb" or kind == "ore" and "ore" or "fish pool"
+        return "Reset all " .. Hex(db.colors[kind]) .. word .. "|r colors?"
+    end
+    local yes = Card(confirm, "Reset", 100, 22, function()
+        confirm:Hide()
+        -- Forgets the picks for that profession's nodes (or all of them).
+        local kindOf = {}
+        for _, node in ipairs(FN.nodes) do kindOf[node.key] = node.kind end
+        for key in pairs(db.nodeColors) do
+            if resetKind == "all" or kindOf[key] == resetKind then db.nodeColors[key] = nil end
+        end
+        ResyncAll()
+        FN:Restyle()
+        if FN.MarkerPreview then FN:MarkerPreview() end
+    end)
+    yes:SetPoint("BOTTOMRIGHT", confirm, "BOTTOM", -4, LOOK_PAD)
+    local no = Card(confirm, "Cancel", 100, 22, function() confirm:Hide() end)
+    no:SetPoint("BOTTOMLEFT", confirm, "BOTTOM", 4, LOOK_PAD)
+    local function Ask(kind)
+        resetKind = kind
+        ask:SetText(Question(kind))
+        -- Sized to its words with a unit of room around them and the buttons, but never wider
+        -- than the section (the note wraps instead), and centered over the list.
+        local maxW = lookWidth + 2 * SECTION_INSET - 8
+        local noteW = askNote.GetUnboundedStringWidth and askNote:GetUnboundedStringWidth() or askNote:GetStringWidth()
+        local textW = math.min(math.max(ask:GetStringWidth(), noteW, 2 * 100 + 8), maxW - 2 * LOOK_PAD)
+        askNote:SetWidth(textW)
+        confirm:SetSize(math.ceil(textW) + 2 * LOOK_PAD,
+            LOOK_PAD + math.ceil(ask:GetStringHeight()) + 4 + math.ceil(askNote:GetStringHeight())
+            + LOOK_PAD + 22 + LOOK_PAD)
+        local listX, buttonX = nodeList:GetCenter(), resetColors:GetCenter()
+        confirm:ClearAllPoints()
+        confirm:SetPoint("BOTTOM", resetColors, "TOP", (listX and buttonX) and (listX - buttonX) or 0, 6)
+        -- Over everything in the panel (its layer can be reset when the panel moves layers).
+        confirm:SetFrameStrata("FULLSCREEN_DIALOG")
+        confirm:SetFrameLevel(math.min((frame and frame:GetFrameLevel() or 0) + 200, 9900))
+        confirm:Show()
+        confirm:Raise()
+        yes:SetFrameLevel(confirm:GetFrameLevel() + 2)
+        no:SetFrameLevel(confirm:GetFrameLevel() + 2)
+    end
+    -- "Reset node colors >": a short menu of what to reset, each in its profession's color
+    -- (All Nodes in red), then the box above asks to be sure.
+    -- What to reset: a small menu of its own under the button (the game's menus leave extra
+    -- room at the bottom), even padding all round, each choice in its profession's color (ALL
+    -- in red). A click anywhere else, or on the button again, closes it.
+    local MENU_PAD, MENU_ROW = 6, 20
+    local resetMenu = CreateFrame("Frame", nil, frame or UIParent)
+    resetMenu:SetFrameStrata("FULLSCREEN_DIALOG")
+    resetMenu:EnableMouse(true)
+    resetMenu:Hide()
+    ToneTexture(resetMenu:CreateTexture(nil, "BACKGROUND"), "strip"):SetAllPoints()
+    Outline(resetMenu, resetMenu, GOLD[1], GOLD[2], GOLD[3], 0.35)
+    -- (catches a click anywhere else, under the menu, to close it)
+    local menuCatcher = CreateFrame("Button", nil, UIParent)
+    menuCatcher:SetAllPoints(UIParent)
+    menuCatcher:SetFrameStrata("FULLSCREEN_DIALOG")
+    menuCatcher:RegisterForClicks("AnyUp")
+    menuCatcher:Hide()
+    menuCatcher:SetScript("OnClick", function() resetMenu:Hide() end)
+    resetMenu:SetScript("OnHide", function() menuCatcher:Hide() end)
+    local menuRows = {}
+    local function MenuRow(i, onClick)
+        local row = CreateFrame("Button", nil, resetMenu)
+        row:SetHeight(MENU_ROW)
+        row:SetPoint("TOPLEFT", 1, -(MENU_PAD + (i - 1) * MENU_ROW))
+        row:SetPoint("TOPRIGHT", -1, -(MENU_PAD + (i - 1) * MENU_ROW))
+        local hover = row:CreateTexture(nil, "HIGHLIGHT")
+        hover:SetAllPoints()
+        hover:SetColorTexture(1, 1, 1, 0.08)
+        row.text = Label(row, "GameFontHighlight", "")
+        row.text:SetPoint("LEFT", MENU_PAD + 4, 0)
+        row:SetScript("OnClick", function()
+            resetMenu:Hide()
+            onClick()
+        end)
+        menuRows[i] = row
+        return row
+    end
+    local MENU = { { "herb", "herbs" }, { "ore", "ores" }, { "fish", "fish pools" } }
+    for i, entry in ipairs(MENU) do MenuRow(i, function() Ask(entry[1]) end) end
+    MenuRow(#MENU + 1, function() Ask("all") end)
+    local function ShowResetMenu()
+        local function Hex(c) return ("|cff%02x%02x%02x"):format(c[1] * 255, c[2] * 255, c[3] * 255) end
+        local widest = 0
+        for i, entry in ipairs(MENU) do
+            menuRows[i].text:SetText("Reset all " .. Hex(db.colors[entry[1]]) .. entry[2] .. "|r")
+        end
+        menuRows[#MENU + 1].text:SetText("Reset |cffff4040ALL nodes|r")
+        for _, row in ipairs(menuRows) do widest = math.max(widest, row.text:GetStringWidth()) end
+        resetMenu:SetSize(math.max(resetColors:GetWidth(), math.ceil(widest) + 2 * (MENU_PAD + 4) + 2),
+            MENU_PAD + #menuRows * MENU_ROW + MENU_PAD)
+        resetMenu:ClearAllPoints()
+        resetMenu:SetPoint("TOPLEFT", resetColors, "BOTTOMLEFT", 0, -2)
+        local level = math.min((frame and frame:GetFrameLevel() or 0) + 200, 9900)
+        menuCatcher:SetFrameLevel(level)
+        resetMenu:SetFrameLevel(level + 5)
+        for _, row in ipairs(menuRows) do row:SetFrameLevel(level + 7) end
+        menuCatcher:Show()
+        resetMenu:Show()
+    end
+    resetColors = Card(nodeList, "Reset node colors", 144, 22, function()
+        if confirm:IsShown() then confirm:Hide() return end
+        if resetMenu:IsShown() then resetMenu:Hide() return end
+        ShowResetMenu()
+    end)
+    -- (gone with the list, the tab or the panel)
+    nodeList:HookScript("OnHide", function() resetMenu:Hide() end)
+    -- Grey words (white on hover): a rarely needed button that shouldn't draw the eye. The words
+    -- stay centered in the button; its ">" sits at the right end on its own, a little darker.
+    if resetColors.SetNormalFontObject and resetColors.GetFontString and resetColors:GetFontString() then
+        resetColors:SetNormalFontObject("GameFontDisableSmall")
+    elseif resetColors.text then
+        resetColors.text:SetTextColor(0.6, 0.6, 0.6)
+    end
+    local resetArrow = resetColors:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+    resetArrow:SetText(">")
+    resetArrow:SetTextColor(0.32, 0.32, 0.32)
+    resetArrow:SetPoint("RIGHT", -6, 0)
+    -- (gone with the list, the tab or the panel)
+    nodeList:HookScript("OnHide", function() confirm:Hide() end)
+    -- Types that are the same thing in better versions stay together, one under another in
+    -- the same column (in the list's own order); the rest stand alone.
+    local FAMILY = {
+        chunk_of_amber = "amber", large_chunk_of_amber = "amber",
+        silver_vein = "silver", truesilver_deposit = "silver", starsilver_vein = "silver",
+        iron_deposit = "iron", cold_iron_deposit = "iron", dark_iron_deposit = "iron",
+        gold_vein = "gold", fools_gold_vein = "gold",
+        small_thorium_vein = "thorium", rich_thorium_vein = "thorium", heavy_thorium_vein = "thorium",
+        small_obsidian_chunk = "obsidian", large_obsidian_chunk = "obsidian",
+        sagefish_school = "sagefish", greater_sagefish_school = "sagefish",
+        floating_debris = "floating", floating_wreckage = "floating", pool_floating_debris_wreckage = "floating",
+    }
+    -- Ores are laid out by hand: the usual progression down the left, the extras down the right.
+    local PLACE = {}
+    for side, keys in pairs({
+        left = { "copper_vein", "tin_vein", "silver_vein", "truesilver_deposit", "starsilver_vein",
+            "iron_deposit", "cold_iron_deposit", "dark_iron_deposit", "mithril_deposit",
+            "small_thorium_vein", "rich_thorium_vein", "heavy_thorium_vein" },
+        right = { "gold_vein", "fools_gold_vein", "chunk_of_amber", "large_chunk_of_amber",
+            "incendicite_mineral_vein", "lesser_bloodstone_deposit", "greater_moonstone_formation",
+            "small_obsidian_chunk", "large_obsidian_chunk" },
+    }) do
+        for rank, key in ipairs(keys) do PLACE[key] = { side, rank } end
+    end
+    -- Two columns: types laid out by hand (PLACE) in their places first; the rest split into
+    -- their families (each in order), each family to the shorter column at the time.
+    local function Columns(list)
+        local left, right = {}, {}
+        -- Herbs: in the list's own order (by skill), down the left column then down the right
+        -- (the left one longer when it doesn't split evenly).
+        if list[1] and list[1].kind == "herb" then
+            local half = math.ceil(#list / 2)
+            for i, node in ipairs(list) do
+                local column = i <= half and left or right
+                column[#column + 1] = node
+            end
+            return left, right
+        end
+        local placed = {}
+        for _, node in ipairs(list) do
+            if PLACE[node.key] then placed[#placed + 1] = node end
+        end
+        table.sort(placed, function(a, b) return PLACE[a.key][2] < PLACE[b.key][2] end)
+        for _, node in ipairs(placed) do
+            local column = PLACE[node.key][1] == "left" and left or right
+            column[#column + 1] = node
+        end
+        local groups, byFamily = {}, {}
+        for _, node in ipairs(list) do
+            if not PLACE[node.key] then
+                local family = FAMILY[node.key]
+                local group = family and byFamily[family]
+                if not group then
+                    group = {}
+                    groups[#groups + 1] = group
+                    if family then byFamily[family] = group end
+                end
+                group[#group + 1] = node
+            end
+        end
+        for _, group in ipairs(groups) do
+            local column = #right < #left and right or left
+            for _, node in ipairs(group) do column[#column + 1] = node end
+        end
+        return left, right
+    end
+    local function LayoutNodeList()
+        local width = lookWidth - 2 * LOOK_IND
+        local colW = math.floor((width - 10) / 2)
+        local y = 0
+        for _, kind in ipairs(FN.kinds) do
+            local head = groupHeads[kind] or GroupHead(kind)
+            groupHeads[kind] = head
+            local c = db.colors[kind]
+            head.name:SetTextColor(c[1], c[2], c[3])
+            local list = {}
+            for _, node in ipairs(FN.nodes) do
+                if node.kind == kind then list[#list + 1] = node end
+            end
+            local open = groupOpen[kind]
+            head.count:SetText(#list .. "   " .. (open and "-" or "+"))
+            head:ClearAllPoints()
+            head:SetPoint("TOPLEFT", 0, -y)
+            head:SetWidth(width)
+            y = y + 22
+            -- An open group's list has room above it (under its line) and a touch more below it.
+            local LIST_PAD = 6
+            if open then y = y + LIST_PAD - 2 end
+            local columns = { Columns(list) }
+            for c, column in ipairs(columns) do
+                for row, node in ipairs(column) do
+                    local sw = nodeSwatches[node.key] or NodeSwatch(node)
+                    nodeSwatches[node.key] = sw
+                    sw:SetShown(open)
+                    if open then
+                        sw:ClearAllPoints()
+                        sw:SetPoint("TOPLEFT", (c - 1) * (colW + 10), -(y + (row - 1) * NODE_ROW))
+                        sw:SetWidth(colW)
+                        sw.Sync()
+                    end
+                end
+            end
+            local rows = math.max(#columns[1], #columns[2])
+            if open then y = y + rows * NODE_ROW + LIST_PAD + 3 end -- (a touch more below)
+        end
+        -- A unit of room above it, the same as under it to the section's edge (clear of the last
+        -- group's row; each group's line ends 2px above `y`).
+        resetColors:ClearAllPoints()
+        resetColors:SetPoint("TOPRIGHT", 0, -(y + LOOK_PAD - 2))
+        nodeList.height = y + LOOK_PAD - 2 + 22 + LOOK_GAP
+    end
+    local nodeHead = SubHead(lookPage, "Node Colors")
+    -- Whether a part of the nearby marker takes the node type's color.
+    local function MarkerUsesNode()
+        return db.dotColorMode == "node" or db.dotEdgeColorMode == "node"
+            or db.circleColorMode == "node" or db.circleEdgeColorMode == "node"
+    end
+
+    PlaceLook = function()
+        local world, mini = openPane == "world", openPane == "minimap"
+        local near = openPane == "nearby"
+        -- The tabs sit flush under the section's header, border to border, in its pinned strip.
+        local full = lookWidth + 2 * SECTION_INSET
+        local tabW = full / #PANES
+        local picked
+        for i, t in ipairs(lookTabs) do
+            local on = PANES[i] == openPane
+            if on then picked = t end
+            t:ClearAllPoints()
+            t:SetPoint("TOPLEFT", look.pin, "TOPLEFT", (i - 1) * tabW, -TAB_GAP)
+            t:SetWidth(tabW)
+            t.edges[1]:SetShown(on)
+            t.edges[3]:SetShown(on and i > 1) -- (the section's own border is the outer side)
+            t.edges[4]:SetShown(on and i < #PANES)
+            if on then
+                t.bg:SetColorTexture(1, 1, 1, 0.04)
+                t.text:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+            else
+                t.bg:SetColorTexture(0, 0, 0, 0.30)
+                t.text:SetTextColor(0.55, 0.55, 0.55)
+            end
+        end
+        tabBaseL:ClearAllPoints()
+        tabBaseL:SetPoint("TOPLEFT", look.pin, "TOPLEFT", 0, -(TAB_GAP + TAB_H))
+        tabBaseL:SetPoint("TOPRIGHT", picked, "BOTTOMLEFT", 0, 0)
+        tabBaseL:SetShown(picked ~= lookTabs[1])
+        tabBaseR:ClearAllPoints()
+        tabBaseR:SetPoint("TOPLEFT", picked, "BOTTOMRIGHT", 0, 0)
+        tabBaseR:SetPoint("TOPRIGHT", look.pin, "TOPRIGHT", 0, -(TAB_GAP + TAB_H))
+        tabBaseR:SetShown(picked ~= lookTabs[#lookTabs])
+        -- Pinned with the tabs: on Nearby, its preview too.
+        local pinH = TAB_GAP + TAB_H
+        if PlacePreview then pinH = PlacePreview(near and pinH or nil) or pinH end
+        look.pinHeight = pinH
+        -- (the first title a unit under the strip)
+        local y = SECTION_TOP
+        -- `inset`: in from both sides (the parts under a heading), or flush.
+        local function Put(f, height, inset)
+            local x = inset and LOOK_IND or 0
+            f:ClearAllPoints()
+            f:SetPoint("TOPLEFT", lookPage, "TOPLEFT", x, -y)
+            f:SetPoint("TOPRIGHT", lookPage, "TOPRIGHT", -x, -y)
+            f:SetHeight(math.max(1, height))
+            y = y + height
+        end
+        iconsPage:SetShown(world or mini)
+        if nearbyPage then nearbyPage:SetShown(near) end
+        local listShown, nodeHeadShown = false, false
+        if world then
+            Put(iconsPage, maps.height)
+            if db.worldDotColor == "node" and FN:WorldMode() ~= "normal" then
+                LayoutNodeList()
+                y = y + 4
+                Put(nodeList, nodeList.height, true)
+                listShown = true
+            end
+        elseif mini then
+            Put(iconsPage, maps.height)
+        elseif near then
+            if nearbyPage then Put(nearbyPage, nearby.height, true) end
+            if MarkerUsesNode() then
+                y = nodeHead.Place(y, true)
+                nodeHeadShown = true
+                LayoutNodeList()
+                Put(nodeList, nodeList.height, true)
+                listShown = true
+            end
+        end
+        if not nodeHeadShown then nodeHead.Place(y, false) end
+        nodeList:SetShown(listShown)
+        -- (the section adds SECTION_PAD under its contents)
+        look.height = math.max(1, y - LOOK_GAP + LOOK_PAD - SECTION_PAD)
+    end
+    sectionWidthFollowers[#sectionWidthFollowers + 1] = function(width)
+        lookWidth = width - 2 * SECTION_INSET
+        LayoutMaps()
+    end
+    end -- Look & Feel
+
+    -- Behavior Tweaks -----------------------------------------------------------
+    -- Which nodes show when, how the panel's list behaves, and which new spots are recorded.
+    -- (The profession colors are in Look & Feel. Saved under the old "colors" key, so the
+    -- shortcuts still open it.)
     local profSection
-    profSection, page = Add(sectionsA, columnA, "colors", "Professions", 124)
+    profSection, page = Add(sectionsB, columnB, "colors", "Behavior Tweaks", 124)
     local profPage = page
-    local note = Label(page, "GameFontNormal", "Colors")
-    note:SetPoint("TOPLEFT", 0, 0)
-    Swatch(page, "Herbs", function() return db.colors.herb end):SetPoint("TOPLEFT", 0, -20)
-    Swatch(page, "Mining", function() return db.colors.ore end):SetPoint("TOPLEFT", 78, -20)
-    Swatch(page, "Fishing", function() return db.colors.fish end):SetPoint("TOPLEFT", 156, -20)
     -- Labels that name a profession in its own color, repainted when a swatch changes.
     local recordLabels = {}
     local function Hex(kind)
@@ -3121,15 +3884,17 @@ local function BuildSettingsPage(columnA, columnB)
         return ("%02x%02x%02x"):format(Byte(c[1]), Byte(c[2]), Byte(c[3]))
     end
     local DIM = "|cff8d8b86"
-    -- Herbs need Find Herbs on and ore Find Minerals (characters without the spell see them anyway).
+
+    -- Showing: herbs need Find Herbs on and ore Find Minerals (characters without the spell see
+    -- them anyway); pools only show while a fishing pole is equipped (off: always); nodes of
+    -- professions the character lacks can be ticked and shown on the maps.
+    local showingTitle = SubHead(profPage, "Showing")
     local tracked = Check(page, "(Herbs/Ore) Only while tracking",
         function() return db.onlyTracked end,
         function(v)
             db.onlyTracked = v and true or false
             FN:Refresh()
         end)
-    tracked:SetPoint("TOPLEFT", 0, -50)
-    -- Pools only show while a fishing pole is equipped (off: always).
     local pole = Check(page, "(Fish pools) Only while pole equipped",
         function() return db.onlyPole end,
         function(v)
@@ -3137,15 +3902,13 @@ local function BuildSettingsPage(columnA, columnB)
             FN:Refresh()
             RefreshNodes()
         end)
-    pole:SetPoint("TOPLEFT", 0, -74)
-    -- Nodes of professions the character lacks can be ticked and shown on the maps.
-    Check(page, "Allow tracking unlearned professions",
+    local unlearned = Check(page, "Allow tracking unlearned professions",
         function() return db.showAll end,
         function(v)
             db.showAll = v and true or false
             FN:Refresh()
             FN:RefreshOptions()
-        end):SetPoint("TOPLEFT", 0, -98)
+        end)
     local function PaintProf()
         tracked:SetLabel(DIM .. "(|r|cff" .. Hex("herb") .. "Herbs|r" .. DIM .. "/|r|cff" .. Hex("ore") .. "Ore|r" .. DIM .. ")|r Only while tracking")
         pole:SetLabel(DIM .. "(|r|cff" .. Hex("fish") .. "Fish pools|r" .. DIM .. ")|r Only while pole equipped")
@@ -3153,18 +3916,7 @@ local function BuildSettingsPage(columnA, columnB)
     syncers[#syncers + 1] = PaintProf
     recordLabels[#recordLabels + 1] = PaintProf
 
-    -- "Appearance & Behavior": a fold like Advanced Minimap Settings (closed each time).
-    local profLine = ToneLine(page)
-    profLine:SetHeight(1)
-    local fold = CreateFrame("Button", nil, page)
-    fold:SetSize(220, 20)
-    local foldText = Label(fold, "GameFontDisable", "Appearance & Behavior")
-    foldText:SetPoint("CENTER")
-    SideLines(fold, foldText)
-    fold:SetScript("OnEnter", function() foldText:SetTextColor(GOLD[1], GOLD[2], GOLD[3]) end)
-    fold:SetScript("OnLeave", function() foldText:SetTextColor(0.5, 0.5, 0.5) end)
-    local foldOpen = false
-
+    -- Panel list: how the profession pages' node lists are sorted and colored.
     -- The gradient on "difficulty coloring": grey, green, yellow, orange, red, letter by letter.
     local function Gradient(text)
         local stops = { { 0.62, 0.62, 0.62 }, { 0.25, 0.75, 0.25 }, { 1, 1, 0 }, { 1, 0.5, 0.25 }, { 1, 0.13, 0.13 } }
@@ -3180,12 +3932,12 @@ local function BuildSettingsPage(columnA, columnB)
         end
         return table.concat(out)
     end
-
-    local foldChecks = {
+    local listTitle = SubHead(profPage, "Panel List")
+    local listChecks = {
         Check(page, DIM .. "(Lvl sort)|r Separate nodes by profession tier",
             function() return db.cutoffs end,
             function(v) db.cutoffs = v and true or false; RefreshNodes() end),
-        Check(page, DIM .. "(A-Z sort)|r Show nodes beyond my profession tier",
+        Check(page, DIM .. "(A-Z sort)|r Show nodes beyond my tier",
             function() return db.azShowBeyond end,
             function(v) db.azShowBeyond = v and true or false; RefreshNodes() end),
         Check(page, DIM .. "(|r|cffffd100Skill 300|r" .. DIM .. ")|r Mute " .. Gradient("difficulty coloring"),
@@ -3196,51 +3948,73 @@ local function BuildSettingsPage(columnA, columnB)
     local muteHint = Label(page, "GameFontDisableSmall", "(doesn't affect tooltips)")
     muteHint:SetTextColor(0.42, 0.42, 0.42)
 
-    local function LayoutProf()
-        local y = 124
-        profLine:ClearAllPoints()
-        profLine:SetPoint("TOPLEFT", profPage, "TOPLEFT", -SECTION_INSET, -(y - 2))
-        profLine:SetPoint("TOPRIGHT", profPage, "TOPRIGHT", SECTION_INSET, -(y - 2))
-        fold:ClearAllPoints()
-        fold:SetPoint("TOP", profPage, "TOP", 0, -(y + 3))
-        y = y + (foldOpen and 32 or 30)
-        for _, c in ipairs(foldChecks) do
-            c:SetShown(foldOpen)
-            if foldOpen then
-                c:ClearAllPoints()
-                c:SetPoint("TOPLEFT", 0, -y)
-                if c == foldChecks[3] then
-                    muteHint:ClearAllPoints()
-                    muteHint:SetPoint("TOPLEFT", Stock() and 29 or 21, -(y + 21))
-                    y = y + 17
-                end
-                y = y + 24
-            end
+    -- Discovery: recording, one setting per profession. Each saves where a node was found (a
+    -- herb or vein when it is gathered, a pool when loot comes out of it). The profession's word
+    -- is in that profession's own color, and follows it when it changes.
+    local discoveryTitle = SubHead(profPage, "Discovery")
+    local recordChecks = {}
+    for _, rec in ipairs({
+        { key = "recordHerb", kind = "herb", before = "Record new ", word = "herb", after = " locations" },
+        { key = "recordOre", kind = "ore", before = "Record new ", word = "mining", after = " locations" },
+        { key = "record", kind = "fish", before = "Record new ", word = "fishing", after = " spots" },
+    }) do
+        local box = Check(page, rec.before .. rec.word .. rec.after, Bool(rec.key, function() end))
+        recordChecks[#recordChecks + 1] = box
+        local function Paint()
+            box:SetLabel(rec.before .. "|cff" .. Hex(rec.kind) .. rec.word .. "|r" .. rec.after)
         end
-        muteHint:SetShown(foldOpen)
-        profSection.height = y - 6
+        syncers[#syncers + 1] = Paint
+        recordLabels[#recordLabels + 1] = Paint
     end
-    fold:SetScript("OnClick", function()
-        foldOpen = not foldOpen
-        LayoutProf()
-        Relayout(true)
-    end)
-    profPage:HookScript("OnHide", function()
-        if foldOpen then
-            foldOpen = false
-            LayoutProf()
-            Relayout(false) -- or its room stays open below it
-        end
-    end)
-    syncers[#syncers + 1] = LayoutProf
+    -- While a color is being picked, the words follow it straight away.
+    function FN:ColorsChanged()
+        for i = 1, #recordLabels do recordLabels[i]() end
+        for i = 1, #profSwatchSets do profSwatchSets[i].Sync() end
+    end
 
+    local function LayoutProf()
+        local IND, GAP = LOOK_IND, LOOK_GAP
+        local y
+        local function At(f, height)
+            f:ClearAllPoints()
+            f:SetPoint("TOPLEFT", IND, -y)
+            y = y + height + GAP
+        end
+        y = showingTitle.Place(SECTION_TOP, true, true)
+        At(tracked, 20)
+        At(pole, 20)
+        At(unlearned, 20)
+        -- Nearby Range (made with the nearby marker's settings).
+        if rangePage and PlaceRange then
+            rangePage:ClearAllPoints()
+            rangePage:SetPoint("TOPLEFT", profPage, "TOPLEFT", IND, -y)
+            rangePage:SetPoint("TOPRIGHT", profPage, "TOPRIGHT", -IND, -y)
+            local height = PlaceRange()
+            rangePage:SetHeight(height)
+            y = y + height
+        end
+        y = listTitle.Place(y, true)
+        At(listChecks[1], 20)
+        At(listChecks[2], 20)
+        At(listChecks[3], 20)
+        -- Its note right under the Skill 300 box's label.
+        muteHint:ClearAllPoints()
+        muteHint:SetPoint("TOPLEFT", IND + (Stock() and 29 or 21), -(y - GAP - 2))
+        y = y + 8
+        y = discoveryTitle.Place(y, true)
+        for _, c in ipairs(recordChecks) do At(c, 20) end
+        profSection.height = SectionHeight(y)
+    end
+    syncers[#syncers + 1] = LayoutProf
+    LayoutProf()
     -- Tooltips -----------------------------------------------------------------
-    -- On top, which tooltips show levels at all. Under them, the Tooltip Customization fold:
-    -- a switch picks which tooltip is being set up (world map, minimap or overworld), each with
-    -- its own settings, and a sample tooltip follows every choice (hovering a menu entry
-    -- previews it).
+    -- Show Levels: which tooltips show levels at all. Customization: a switch picks which
+    -- tooltip is being set up (world map, minimap or overworld), each with its own settings,
+    -- and a sample tooltip follows every choice (hovering a menu entry previews it).
+    -- (In its own block: the settings page has more parts than one function may name.)
+    do
     local tipSection
-    tipSection, page = Add(sectionsA, columnA, "tooltips", "Tooltips", 200)
+    tipSection, page = Add(sectionsB, columnB, "tooltips", "Tooltips", 200)
     local tipPage = page
     local UpdateTips, LayoutTips -- set below; the controls call them
     local editingTip = "overworld"
@@ -3259,7 +4033,6 @@ local function BuildSettingsPage(columnA, columnB)
                 if t[1] == "world" then FN:Refresh() end
                 UpdateTips()
             end)
-        box:SetPoint("TOPLEFT", 0, -(i - 1) * 24)
         tipChecks[t[1]] = box
     end
     -- The minimap's herb is worked out from where the cursor is (the game hides its name).
@@ -3270,51 +4043,11 @@ local function BuildSettingsPage(columnA, columnB)
         if font and size then miniTag:SetFont(font, math.max(size - 2, 8), flags) end
     end
     miniTag:SetPoint("LEFT", tipChecks.minimap, "RIGHT", 2, 0)
-    local FOLD_TOP = #TIP_CHECKS * 24 + 4 -- where the fold starts, under the tick boxes
+    local showTitle = SubHead(page, "Show Levels")
+    local customTitle = SubHead(page, "Customization")
+    local gatherParts = {} -- (the customization's parts)
 
-    -- The fold: a centered label, gold on hover, like Advanced Minimap Settings.
-    local gatherOpen = false -- starts closed, like the other folds
-    local gather = CreateFrame("Button", nil, page)
-    gather:SetSize(220, 20)
-    gather:SetPoint("TOP", page, "TOP", 0, -(FOLD_TOP + 6))
-    local gatherText = Label(gather, "GameFontDisable", "Tooltip Customization")
-    gatherText:SetPoint("CENTER")
-    SideLines(gather, gatherText)
-    local function PaintGather(lit)
-        if lit then gatherText:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
-        else gatherText:SetTextColor(0.5, 0.5, 0.5) end
-    end
-    gather:SetScript("OnEnter", function() PaintGather(true) end)
-    gather:SetScript("OnLeave", function() PaintGather(false) end)
-    gather:SetScript("OnClick", function()
-        gatherOpen = not gatherOpen
-        LayoutTips()
-        Relayout(true)
-    end)
-    local gatherParts = {} -- everything inside the fold
-    -- A line above and below the label, border to border, like the one above Advanced Minimap
-    -- Settings (and in the section border's color), so it reads as its own sub-section under
-    -- the tick boxes.
-    -- (Drawn on a frame of their own, above the section's other contents.)
-    local lineFrame = CreateFrame("Frame", nil, page)
-    lineFrame:SetAllPoints(page)
-    lineFrame:SetFrameLevel(page:GetFrameLevel() + 8)
-    local function GatherLine(y)
-        local t = ToneLine(lineFrame)
-        t:SetHeight(1)
-        function t:At(at)
-            self:ClearAllPoints()
-            self:SetPoint("TOPLEFT", tipPage, "TOPLEFT", -SECTION_INSET, -at)
-            self:SetPoint("TOPRIGHT", tipPage, "TOPRIGHT", SECTION_INSET, -at)
-        end
-        t:At(y)
-        return t
-    end
-    GatherLine(FOLD_TOP + 2)
-    -- The closing line: under the label when closed, under everything in the fold when open.
-    local gatherEnd = GatherLine(FOLD_TOP + 30)
-
-    -- Which tooltip: one switch, like Maps & Icons' "Minimap | World map", with three parts.
+    -- Which tooltip: one switch with three parts.
     local TARGETS = { "world", "minimap", "overworld" }
     local targetToggle = MultiToggle(page, { "World map", "Minimap", "Overworld" }, function(i)
         editingTip = TARGETS[i]
@@ -3323,8 +4056,6 @@ local function BuildSettingsPage(columnA, columnB)
         LayoutTips()
         Relayout(true)
     end)
-    targetToggle:SetPoint("TOP", page, "TOP", 0, -(FOLD_TOP + 26))
-    gatherParts[#gatherParts + 1] = targetToggle
 
     -- A dropdown for one setting of the tooltip being edited. `entries` is a list of
     -- { value, text } or a function returning one (for wording that follows other choices).
@@ -3439,7 +4170,6 @@ local function BuildSettingsPage(columnA, columnB)
     -- Preview: a sample tooltip for the one being edited.
     local box = CreateFrame("Frame", nil, page)
     box:SetSize(234, 52)
-    sectionWidthFollowers[#sectionWidthFollowers + 1] = function(w) box:SetWidth(math.max(160, w - 2 * SECTION_INSET)) end
     local bg = Fill(box, "BACKGROUND", 0.03, 0.035, 0.055, 0.96); bg:SetAllPoints()
     Outline(box, box, 0.29, 0.3, 0.34, 1)
     local cap = Label(box, "GameFontDisableSmall", "PREVIEW"); cap:SetPoint("TOPRIGHT", -8, -6)
@@ -3496,51 +4226,68 @@ local function BuildSettingsPage(columnA, columnB)
     end
 
     function LayoutTips()
-        PaintGather(false)
-        for _, part in ipairs(gatherParts) do part:SetShown(gatherOpen) end
-        local y = FOLD_TOP + 30
-        if gatherOpen then
-            for i, key in ipairs(TARGETS) do if key == editingTip then targetToggle:SetPick(i) end end
-            -- The switch, the settings, then the preview.
-            y = FOLD_TOP + 37
-            targetToggle:ClearAllPoints(); targetToggle:SetPoint("TOP", tipPage, "TOP", 0, -y)
-            y = y + 34
-            local cfg = Cfg()
-            for _, row in ipairs(rows) do
-                -- The world map tooltip is our own one-line list: nothing to attach to.
-                local shown = not (row == attachRow and editingTip == "world")
-                row.label:SetShown(shown)
-                row.dd:SetShown(shown)
-                if shown then
-                    row.label:ClearAllPoints(); row.label:SetPoint("TOPLEFT", 0, -(y + 5))
-                    row.dd:ClearAllPoints(); row.dd:SetPoint("TOPLEFT", DD_X, -y)
-                    -- On the minimap's name line the level can only follow the name.
-                    local fixed = row == placeRow and editingTip == "minimap" and cfg.attach ~= "skill"
-                    row.label:SetAlpha(fixed and 0.4 or 1)
-                    row.dd:SetAlpha(fixed and 0.4 or 1)
-                    row.dd:EnableMouse(not fixed)
-                    y = y + 26
-                end
-            end
-            sizeRow:SetShown(editingTip == "world")
-            if editingTip == "world" then
-                sizeRow:ClearAllPoints(); sizeRow:SetPoint("TOPLEFT", 0, -(y + 1))
-                sizeRow:SetWidth(tipPage:GetWidth() > 0 and tipPage:GetWidth() or 234)
-                y = y + 26
-            end
-            UpdateTips()
-            box:ClearAllPoints(); box:SetPoint("TOPLEFT", 0, -(y + 6))
-            y = y + 6 + box:GetHeight() + 10
+        local IND, GAP = LOOK_IND, LOOK_GAP
+        local width = sectionInner - 2 * IND
+        local y
+        local function At(f, height, x)
+            f:ClearAllPoints()
+            f:SetPoint("TOPLEFT", x or IND, -y)
+            y = y + height + GAP
         end
-        gatherEnd:At(y)
-        tipSection.height = y + 2
+        y = showTitle.Place(SECTION_TOP, true, true)
+        for _, t in ipairs(TIP_CHECKS) do At(tipChecks[t[1]], 20) end
+
+        -- Customization: the switch, the settings in rows, then the preview.
+        y = customTitle.Place(y, true)
+        for i, key in ipairs(TARGETS) do if key == editingTip then targetToggle:SetPick(i) end end
+        targetToggle:ClearAllPoints()
+        targetToggle:SetPoint("TOP", tipPage, "TOP", 0, -y)
+        y = y + 22 + GAP
+        local cfg = Cfg()
+        local ROW_GAP = 6 -- rows of one list sit a little closer
+        for _, row in ipairs(rows) do
+            -- The world map tooltip is our own one-line list: nothing to attach to.
+            local shown = not (row == attachRow and editingTip == "world")
+            row.label:SetShown(shown)
+            row.dd:SetShown(shown)
+            if shown then
+                row.label:ClearAllPoints()
+                row.label:SetPoint("TOPLEFT", IND, -(y + 5))
+                row.dd:SetWidth(width - DD_X)
+                row.dd:ClearAllPoints()
+                row.dd:SetPoint("TOPLEFT", IND + DD_X, -y)
+                -- On the minimap's name line the level can only follow the name.
+                local fixed = row == placeRow and editingTip == "minimap" and cfg.attach ~= "skill"
+                row.label:SetAlpha(fixed and 0.4 or 1)
+                row.dd:SetAlpha(fixed and 0.4 or 1)
+                row.dd:EnableMouse(not fixed)
+                y = y + 22 + ROW_GAP
+            end
+        end
+        y = y - ROW_GAP + GAP
+        sizeRow:SetShown(editingTip == "world")
+        if editingTip == "world" then
+            sizeRow:SetWidth(width)
+            At(sizeRow, 20)
+        end
+        UpdateTips()
+        box:SetWidth(width)
+        At(box, box:GetHeight())
+        tipSection.height = SectionHeight(y)
     end
     syncers[#syncers + 1] = function() LayoutTips() end
+    sectionWidthFollowers[#sectionWidthFollowers + 1] = function() LayoutTips() end
     LayoutTips()
+    end -- Tooltips
 
     -- Nearby nodes -------------------------------------------------------------
-    local nearby
-    nearby, page = Add(sectionsB, columnB, "nearby", "Nearby nodes", 300)
+    -- Inside Look & Feel's Minimap fold, under the icon settings (placed by PlaceLook).
+    nearby = { height = 300 }
+    page = CreateFrame("Frame", nil, lookPage)
+    nearbyPage = page
+    -- Range: its own frame, in Behavior Tweaks (placed by LayoutProf, after Showing).
+    rangePage = CreateFrame("Frame", nil, profPage)
+    page = rangePage
     local rangeLabel = Label(page, nil, "Range")
     rangeLabel:SetPoint("TOPLEFT", 0, -6)
     local range = CreateFrame("EditBox", nil, page, "InputBoxTemplate")
@@ -3570,18 +4317,20 @@ local function BuildSettingsPage(columnA, columnB)
     local yards = Label(page, nil, "yds")
     yards:SetPoint("LEFT", range, "RIGHT", 6, 0)
     local hint = Label(page, "GameFontDisableSmall",
-        "Nodes officially appear between ~185-190 yds")
+        "Within this range a node's minimap icon turns into the nearby marker. "
+        .. "The game itself shows nodes from about 185-190 yds.")
+    hint:SetJustifyH("CENTER")
+    if hint.SetWordWrap then hint:SetWordWrap(true) end
     hint:SetPoint("TOPLEFT", 0, -29)
+    page = nearbyPage
 
     -- Marker parts. A "Dot | Circle" switch picks which one is being set up. Each side shows a
     -- sample of the whole marker on a piece of map, the shape's own settings beside it, and its
     -- border's settings under a line, with the border's on/off box on the left.
-    local nearbyPage = page
     local LayoutMarkers -- set below; the controls call it
-    local editingMark = "dot"
-    local innerWidth = SECTION_WIDTH - 2 * SECTION_INSET -- follows the section (wider when docked)
+    local innerWidth = SECTION_WIDTH - 2 * SECTION_INSET - 2 * LOOK_IND -- follows the section (wider when docked; indented in Look & Feel)
     local ROW = 24     -- one settings row
-    local LABEL_W = 46 -- row labels, then the control
+    local LABEL_W = 56 -- row labels, then the control
     local VALUE_W = 34 -- a slider's value, at the right
     -- "Profession" color means each node's own profession's: the sample cycles through them.
     local previewColor = { 1, 1, 1 }
@@ -3688,14 +4437,21 @@ local function BuildSettingsPage(columnA, columnB)
         end)
         syncers[#syncers + 1] = Paint
         Paint()
+        box.key = key
         return box
     end
-    -- Color: "Linked to Profession" or "Custom", and a chip of the color in use beside it
+    -- One node type per profession, standing in for "node type" colors in the chip and sample.
+    local SAMPLE_NODE = { herb = "peacebloom", ore = "copper_vein", fish = "sagefish_school" }
+    local function SampleNodeColor(kind)
+        return FN:NodeColor({ key = SAMPLE_NODE[kind], kind = kind })
+    end
+    -- Color: "Linked to Profession", "Linked to Node type" or "Custom", and a chip of the color in use beside it
     -- (the profession's, or the custom one to click and change).
     local function ColorRow(prefix)
         local modeKey, colorKey = prefix .. "ColorMode", prefix .. "Color"
         local button = MenuButton({
             { "prof", "Profession color", "|cff9d9d9dLinked to|r Profession", "Profession" },
+            { "node", "Node type color", "|cff9d9d9dLinked to|r Node type", "Node type" },
             { "custom", "Custom color", "Custom" },
         }, function() return db[modeKey] end, function(v) db[modeKey] = v end)
         local swatch = Swatch(nearbyPage, "", function() return db[colorKey] end)
@@ -3722,52 +4478,38 @@ local function BuildSettingsPage(columnA, columnB)
             swatch:SetShown(visible and custom)
             chip:SetShown(visible and not custom)
             for kind, t in pairs(stripes) do
-                local c = db.colors[kind]
+                local c = db[modeKey] == "node" and SampleNodeColor(kind) or db.colors[kind]
                 t:SetColorTexture(c[1], c[2], c[3], 1)
             end
         end
         return row
     end
 
-    -- The two sides: the shape's on/off box and rows, then its border's.
-    local tabs = {
-        dot = {
-            mainBox = OnOffBox("Dot", "dotOn"),
-            main = {
-                ColorRow("dot"),
-                SliderRow("Size", 0, 12, 1, "%d", "dotSize"),
-            },
-            edgeKey = "dotEdgeOn",
-            edge = {
-                ColorRow("dotEdge"),
-                SliderRow("Width", 0.5, 4, 0.5, "%.1f", "dotEdgeWidth"),
-                SliderRow("Radius", 0.5, 15, 0.25, Trim, "dotEdgeRadius"),
-            },
-        },
-        circle = {
-            mainBox = OnOffBox("Circle", "circleOn"),
-            main = {
-                ColorRow("circle"),
-                SliderRow("Width", 0.5, 8, 0.5, "%.1f", "circleWidth"),
-                SliderRow("Radius", 2, 20, 0.25, Trim, "circleRadius"),
-            },
-            edgeKey = "circleEdgeOn",
-            edge = {
-                ColorRow("circleEdge"),
-                SliderRow("Width", 0.5, 4, 0.5, "%.1f", "circleEdgeWidth"),
-                SliderRow("Radius", 0.5, 24, 0.25, Trim, "circleEdgeRadius"),
-            },
-        },
+    -- The marker's four parts, top to bottom: each its on/off box, with its settings under it.
+    local parts = {
+        { box = OnOffBox("Circle", "circleOn"), rows = {
+            SliderRow("Width", 0.5, 8, 0.5, "%.1f", "circleWidth"),
+            SliderRow("Radius", 2, 20, 0.25, Trim, "circleRadius"),
+        } },
+        { box = OnOffBox("Circle Border", "circleEdgeOn"), rows = {
+            ColorRow("circleEdge"),
+            SliderRow("Width", 0.5, 4, 0.5, "%.1f", "circleEdgeWidth"),
+            SliderRow("Radius", 0.5, 24, 0.25, Trim, "circleEdgeRadius"),
+        } },
+        { box = OnOffBox("Dot", "dotOn"), rows = {
+            SliderRow("Size", 0, 12, 1, "%d", "dotSize"),
+        } },
+        { box = OnOffBox("Dot Border", "dotEdgeOn"), rows = {
+            ColorRow("dotEdge"),
+            SliderRow("Width", 0.5, 4, 0.5, "%.1f", "dotEdgeWidth"),
+            SliderRow("Radius", 0.5, 15, 0.25, Trim, "dotEdgeRadius"),
+        } },
     }
-    for _, tab in pairs(tabs) do
-        tab.line = Line()
-        tab.edgeBox = OnOffBox("Border", tab.edgeKey)
-    end
 
     -- The sample: a piece of map with the whole marker on it (dot, circle and both borders),
     -- drawn larger, but never so large that part of it is cut off.
     local PREVIEW_ZOOM = 2
-    local preview = CreateFrame("Frame", nil, nearbyPage)
+    local preview = CreateFrame("Frame", nil, look.pin)
     local previewMap = preview:CreateTexture(nil, "BACKGROUND")
     previewMap:SetTexture(FN.MEDIA .. "preview_map")
     previewMap:SetAllPoints()
@@ -3779,10 +4521,22 @@ local function BuildSettingsPage(columnA, columnB)
     -- Each profession's color holds a moment, then blends into the next.
     local HOLD, BLEND = 1.2, 0.4
     local cycleAt, cycleIndex = 0, 1
+    -- What the sample cycles through: the colors the part being set up can take.
+    local SKILL_COLORS = { { 1, 0.5, 0.25 }, { 1, 1, 0 }, { 0.25, 0.75, 0.25 }, { 0.5, 0.5, 0.5 } }
+    local function CycleList()
+        local mode = db.dotColorMode
+        if mode == "difficulty" then return SKILL_COLORS end
+        local list = {}
+        for i, kind in ipairs(FN.kinds) do
+            list[i] = mode == "node" and SampleNodeColor(kind) or db.colors[kind]
+        end
+        return list
+    end
     local function CycleColor()
-        local kinds = FN.kinds
-        local a = db.colors[kinds[cycleIndex]]
-        local b = db.colors[kinds[cycleIndex % #kinds + 1]]
+        local list = CycleList()
+        if cycleIndex > #list then cycleIndex = 1 end
+        local a = list[cycleIndex]
+        local b = list[cycleIndex % #list + 1]
         local t = math.max(0, cycleAt - HOLD) / BLEND
         for i = 1, 3 do previewColor[i] = a[i] + (b[i] - a[i]) * t end
     end
@@ -3791,7 +4545,7 @@ local function BuildSettingsPage(columnA, columnB)
         cycleAt = cycleAt + elapsed
         if cycleAt >= HOLD + BLEND then
             cycleAt = 0
-            cycleIndex = cycleIndex % #FN.kinds + 1
+            cycleIndex = cycleIndex % #CycleList() + 1
         elseif not wasBlending and cycleAt <= HOLD then
             return -- holding: nothing changes
         end
@@ -3799,27 +4553,57 @@ local function BuildSettingsPage(columnA, columnB)
     end)
     function FN:MarkerPreview()
         CycleColor()
-        FN:DrawMarker(sample, previewColor)
+        FN:DrawMarker(sample, previewColor, nil, previewColor, previewColor)
         local room = (preview:GetWidth() or 72) - 8
         local whole = math.max(sample:GetWidth(), 1)
         sample:SetScale(math.max(math.min(PREVIEW_ZOOM, room / whole), 0.5))
     end
 
-    local topLine = Line()  -- above the range row
-    local headLine = Line() -- under the sample and the switch
+    -- Color: one choice for the circle and the dot together (their borders keep their own), the
+    -- world map's choices plus a custom color, under its own gold heading.
+    local markerHead = SubHead(nearbyPage, "Marker", LOOK_IND)
+    local rangeHead = SubHead(rangePage, "Nearby Range", LOOK_IND)
+    local colorHead = SubHead(nearbyPage, "Color", LOOK_IND)
+    local MARK_KEYS = { "prof", "difficulty", "node", "custom" }
+    local markCards = {}
+    for _, choice in ipairs({ { "prof", "Profession" }, { "difficulty", "Difficulty" }, { "node", "Node type" },
+        { "custom", "Custom" } }) do
+        markCards[choice[1]] = Card(nearbyPage, choice[2], 74, 22, function()
+            db.dotColorMode, db.circleColorMode = choice[1], choice[1]
+            -- Custom: one color for both (the circle takes the dot's).
+            if choice[1] == "custom" then db.circleColor = db.dotColor end
+            ResyncAll()
+            Refit()
+        end)
+    end
+    local markCustom = Swatch(nearbyPage, "Custom color for |cffffd100minimap|r circles/dots", function() return db.dotColor end)
+    local MARK_HINT = {
+        prof = "Each profession's own color",
+        difficulty = "Colored by your skill, like recipes",
+        node = "Each node type's own color",
+        custom = "One color for every node",
+    }
+    local markHint = Label(nearbyPage, "GameFontDisableSmall", "")
+    markHint:SetJustifyH("CENTER")
+    if markHint.SetWordWrap then markHint:SetWordWrap(true) end
+    local markProfHead = SubHead(nearbyPage, "Profession Colors", LOOK_IND)
+    local markProfColors = ProfSwatches(nearbyPage)
+    local markDiffHead = SubHead(nearbyPage, "Difficulty Colors", LOOK_IND)
+    local markDiffColors = DiffSwatches(nearbyPage, markProfColors)
+    local markCustomHead = SubHead(nearbyPage, "Custom Color", LOOK_IND)
+
     -- What the marker is, beside the sample.
-    local about = Label(nearbyPage, "GameFontDisableSmall",
-        "Within range, node icons on the minimap fade, revealing this custom indicator. It keeps "
-        .. "the game's own node dot easy to see, and you can customize it below:")
+    local previewTitle = Label(look.pin, "GameFontNormal", "Preview")
+    local previewLine = ToneLine(look.pin) -- under the preview: what scrolls stops here
+    previewLine:SetHeight(1)
+    -- Its own darker strip, so it reads as apart from the settings (1px in, for the borders).
+    local previewBg = ToneTexture(look.pin:CreateTexture(nil, "BACKGROUND"), "strip")
+    local about = Label(look.pin, "GameFontDisableSmall",
+        "Within range, a node's minimap icon fades and this marker shows instead, so the game's own "
+        .. "node dot stays easy to see.")
     about:SetJustifyH("LEFT")
     about:SetJustifyV("TOP")
     if about.SetWordWrap then about:SetWordWrap(true) end
-    local markToggle = PairToggle(nearbyPage, "Dot", "Circle", function()
-        editingMark = editingMark == "dot" and "circle" or "dot"
-        ResyncAll()
-        Refit()
-    end)
-    syncers[#syncers + 1] = function() markToggle:SetRight(editingMark == "circle") end
 
     -- Places one block of rows in the right-hand column, starting at `y`; returns its height.
     local function PlaceRows(rows, x, width, y, visible)
@@ -3847,72 +4631,102 @@ local function BuildSettingsPage(columnA, columnB)
         return #rows * ROW
     end
 
-    -- On top, a short description at the left and the sample at the right, then the
-    -- Dot | Circle switch centered under them. Under that the
-    -- shape's block and its border's block, each with its on/off box at the left and its
-    -- settings in a column at the right. Then the range, under a line.
-    local MARKERS_TOP = 4
-    local COL_X = 80      -- where the settings column starts
+    -- On top, a short description at the left and the sample at the right. Under them the four
+    -- parts, each its on/off box with its settings under it (a line between the circle's and the
+    -- dot's), then the range. Last, the Color heading and its choices.
+    local ROWS_X = 24 -- the settings, in under their on/off box
     function LayoutMarkers()
-        local y = MARKERS_TOP
+        local GAP, PAD = LOOK_GAP, LOOK_PAD
+        local y = 0
 
-        -- The sample is larger when the section has the room (docked).
+        -- Marker: the four parts, each its on/off box with its settings under it, the same
+        -- room between each (no lines: the spacing parts them).
+        y = markerHead.Place(y, true, true) -- (the preview's line is above it)
+        for i, part in ipairs(parts) do
+            if i > 1 then y = y + 8 end
+            part.box:ClearAllPoints()
+            part.box:SetPoint("TOPLEFT", 0, -y)
+            y = y + 20 + GAP
+            -- Its settings only while it is on: an unticked part is just its name.
+            local on = db[part.box.key] and true or false
+            local rowsHeight = PlaceRows(part.rows, ROWS_X, innerWidth - ROWS_X, y - 4, on)
+            if on then y = y + rowsHeight - 4 + GAP end
+        end
+
+        -- Color: one choice for the circle and the dot.
+        y = colorHead.Place(y, true)
+        local mode = db.dotColorMode
+        PlaceRow(markCards, MARK_KEYS, y, innerWidth, mode, true, 0, 6)
+        y = y + 22 + GAP
+        markHint:SetText(MARK_HINT[mode] or MARK_HINT.prof)
+        markHint:SetWidth(innerWidth)
+        markHint:ClearAllPoints()
+        markHint:SetPoint("TOPLEFT", 0, -y)
+        y = y + math.ceil(markHint:GetStringHeight()) + GAP
+        -- The chosen color's own section (Node type's list is placed after this, by PlaceLook).
+        y = markProfHead.Place(y, mode == "prof")
+        y = markProfColors.Place(y, innerWidth, mode == "prof")
+        y = markDiffHead.Place(y, mode == "difficulty")
+        y = markDiffColors.Place(y, innerWidth, mode == "difficulty")
+        y = markCustomHead.Place(y, mode == "custom")
+        markCustom:SetShown(mode == "custom")
+        if mode == "custom" then
+            -- (lined up with the first profession swatch, like the difficulty key)
+            markCustom:ClearAllPoints()
+            markCustom:SetPoint("TOPLEFT", nearbyPage, "TOPLEFT", markProfColors.FirstX(innerWidth), -y)
+            y = y + 20 + GAP
+        end
+        nearby.height = y
+        if PlaceLook then PlaceLook() end
+    end
+    -- Preview, in Look & Feel's pinned strip under the tabs (from `top` down): its title, the
+    -- sample at the left and what the marker is beside it (larger when the section has the
+    -- room, docked). Returns where the strip ends; `top` nil hides it (other tabs).
+    -- Range, in its own frame (placed by PlaceLook last in the tab): the game's own range,
+    -- centered, then the box we switch at, "Range" before it and "yds" after. Returns its height.
+    PlaceRange = function()
+        local y = rangeHead.Place(0, true)
+        hint:SetWidth(sectionInner - 2 * LOOK_IND)
+        hint:ClearAllPoints()
+        hint:SetPoint("TOP", rangePage, "TOP", 0, -y)
+        local boxY = y + math.ceil(hint:GetStringHeight()) + 6
+        range:ClearAllPoints()
+        range:SetPoint("TOP", rangePage, "TOP", 0, -boxY)
+        rangeLabel:ClearAllPoints()
+        rangeLabel:SetPoint("RIGHT", range, "LEFT", -12, 0)
+        return boxY + 20 + LOOK_GAP
+    end
+    PlacePreview = function(top)
+        local shown = top ~= nil
+        preview:SetShown(shown)
+        about:SetShown(shown)
+        previewTitle:SetShown(shown)
+        previewLine:SetShown(shown)
+        previewBg:SetShown(shown)
+        if not shown then return nil end
+        previewTitle:ClearAllPoints()
+        previewTitle:SetPoint("TOPLEFT", look.pin, "TOPLEFT", LOOK_PAD, -(top + LOOK_PAD))
+        local y = top + LOOK_PAD + LOOK_TITLE_H + LOOK_PAD
+        local x = SECTION_INSET + LOOK_IND
         local size = innerWidth >= 300 and 80 or 64
         preview:SetSize(size, size)
         FN:MarkerPreview() -- fits the sample to the new size
         preview:ClearAllPoints()
-        preview:SetPoint("TOPRIGHT", nearbyPage, "TOPRIGHT", 0, -y)
+        preview:SetPoint("TOPLEFT", look.pin, "TOPLEFT", x, -y)
         about:ClearAllPoints()
-        about:SetPoint("TOPLEFT", 0, -(y + 2))
+        about:SetPoint("TOPLEFT", look.pin, "TOPLEFT", x + size + 12, -(y + 2))
         about:SetWidth(innerWidth - size - 12)
-        y = y + math.max(size, math.ceil(about:GetStringHeight()) + 2) + 8
-        markToggle:ClearAllPoints()
-        markToggle:SetPoint("TOP", nearbyPage, "TOP", 0, -y)
-        y = y + 28
-        headLine:ClearAllPoints()
-        headLine:SetPoint("TOPLEFT", nearbyPage, "TOPLEFT", 0, -(y + 4))
-        headLine:SetPoint("TOPRIGHT", nearbyPage, "TOPRIGHT", 0, -(y + 4))
-        y = y + 12
-
-        local width = innerWidth - COL_X
-        for key, t in pairs(tabs) do
-            local open = key == editingMark
-            t.line:SetShown(open)
-            t.mainBox:SetShown(open)
-            t.edgeBox:SetShown(open)
-            local mainHeight = PlaceRows(t.main, COL_X, width, y, open)
-            if open then
-                -- Each on/off box level with the middle of its own rows.
-                t.mainBox:ClearAllPoints()
-                t.mainBox:SetPoint("LEFT", nearbyPage, "TOPLEFT", 0, -(y + mainHeight / 2))
-                local top = y + mainHeight + 2
-                t.line:ClearAllPoints()
-                t.line:SetPoint("TOPLEFT", nearbyPage, "TOPLEFT", 0, -(top + 4))
-                t.line:SetPoint("TOPRIGHT", nearbyPage, "TOPRIGHT", 0, -(top + 4))
-                top = top + 12
-                local edgeHeight = PlaceRows(t.edge, COL_X, width, top, true)
-                t.edgeBox:ClearAllPoints()
-                t.edgeBox:SetPoint("LEFT", nearbyPage, "TOPLEFT", 0, -(top + edgeHeight / 2))
-                local bottom = top + edgeHeight + 6
-                topLine:ClearAllPoints()
-                topLine:SetPoint("TOPLEFT", nearbyPage, "TOPLEFT", -SECTION_INSET, -bottom)
-                topLine:SetPoint("TOPRIGHT", nearbyPage, "TOPRIGHT", SECTION_INSET, -bottom)
-                -- The game's own range, centered, then the range we switch at.
-                hint:ClearAllPoints()
-                hint:SetPoint("TOP", nearbyPage, "TOP", 0, -(bottom + 10))
-                -- The box itself centered under the note, "Range" before it and "yds" after.
-                range:ClearAllPoints()
-                range:SetPoint("TOP", nearbyPage, "TOP", 0, -(bottom + 28))
-                rangeLabel:ClearAllPoints()
-                rangeLabel:SetPoint("RIGHT", range, "LEFT", -12, 0)
-                nearby.height = bottom + 54
-            else
-                PlaceRows(t.edge, COL_X, width, y, false)
-            end
-        end
+        local bottom = y + math.max(size, math.ceil(about:GetStringHeight()) + 2) + LOOK_PAD
+        previewLine:ClearAllPoints()
+        previewLine:SetPoint("TOPLEFT", look.pin, "TOPLEFT", 0, -bottom)
+        previewLine:SetPoint("TOPRIGHT", look.pin, "TOPRIGHT", 0, -bottom)
+        previewBg:ClearAllPoints()
+        previewBg:SetPoint("TOPLEFT", look.pin, "TOPLEFT", 1, -top)
+        previewBg:SetPoint("BOTTOMRIGHT", look.pin, "TOPRIGHT", -1, -bottom)
+        return bottom + 1
     end
     sectionWidthFollowers[#sectionWidthFollowers + 1] = function(width)
-        innerWidth = width - 2 * SECTION_INSET
+        innerWidth = width - 2 * SECTION_INSET - 2 * LOOK_IND
         if LayoutMarkers then LayoutMarkers() end
     end
     syncers[#syncers + 1] = function()
@@ -3922,92 +4736,50 @@ local function BuildSettingsPage(columnA, columnB)
     recordLabels[#recordLabels + 1] = function() FN:MarkerPreview(); LayoutMarkers() end -- profession colors changed
     LayoutMarkers()
 
-    -- Node lists ---------------------------------------------------------------
-    _, page = Add(sectionsB, columnB, "lists", "Discovery", 68)
-    -- Recording, one setting per profession. Each saves where a node was found (a herb
-    -- or vein when it is gathered, a pool when loot comes out of it); new types join
-    -- their list unticked. The profession's word is in that profession's own color
-    -- (Colors section), and follows it when it changes.
-    for i, rec in ipairs({
-        { key = "recordHerb", kind = "herb", before = "Record new ", word = "herb", after = " locations" },
-        { key = "recordOre", kind = "ore", before = "Record new ", word = "mining", after = " locations" },
-        { key = "record", kind = "fish", before = "Record new ", word = "fishing", after = " spots" },
-    }) do
-        local box = Check(page, rec.before .. rec.word .. rec.after, Bool(rec.key, function() end))
-        box:SetPoint("TOPLEFT", 0, -24 * (i - 1))
-        local function Paint()
-            box:SetLabel(rec.before .. "|cff" .. Hex(rec.kind) .. rec.word .. "|r" .. rec.after)
-        end
-        syncers[#syncers + 1] = Paint
-        recordLabels[#recordLabels + 1] = Paint
-    end
-    -- While a color is being picked, the words follow it straight away.
-    function FN:ColorsChanged()
-        for i = 1, #recordLabels do recordLabels[i]() end
-    end
+    -- Interface ----------------------------------------------------------------
+    do
+    local uiSection
+    uiSection, page = Add(sectionsB, columnB, "window", "Interface", 368)
+    local uiPage = page
 
-    -- Advanced -----------------------------------------------------------------
-    _, page = Add(sectionsB, columnB, "window", "Advanced", 368)
-    -- A gold title; all but the first have a dividing line above them.
-    local function GroupTitle(text, y, ruled)
-        if ruled then
-            local rule = ToneLine(page)
-            rule:SetHeight(1)
-            rule:SetPoint("TOPLEFT", 0, y + 8)
-            rule:SetPoint("TOPRIGHT", 0, y + 8)
-        end
-        local title = Label(page, "GameFontNormal", text)
-        title:SetPoint("TOPLEFT", 0, y)
-        return title
-    end
-
-    GroupTitle("UI", 0)
+    local panelTitle = SubHead(page, "Panel")
     local dockBox = Check(page, "Panel docked to world map", Bool("dock", function()
         FN:DockSettingChanged()
     end))
-    dockBox:SetPoint("TOPLEFT", 0, -22)
     local dockHint = Label(page, "GameFontDisableSmall", "(Uncheck for floating panel)")
     dockHint:SetTextColor(0.42, 0.42, 0.42)
-    dockHint:SetPoint("TOPLEFT", Stock() and 29 or 21, -43) -- under the tick box's label
 
-    GroupTitle("Theme", -74, true)
+    local themeTitle = SubHead(page, "Theme")
+    -- Three buttons splitting the row, like Mode's.
     local TONES = { "auto", "brown", "dark" }
-    local theme
-    theme = MultiToggle(page, { "Auto", "Native", "Dark" }, function(i)
-        db.tone = TONES[i]
-        theme:SetPick(i)
-        for n = 1, #toneFollowers do toneFollowers[n]() end
-        FN:RefreshOptions()
-    end)
-    theme:SetPoint("TOP", 0, -94)
-    syncers[#syncers + 1] = function()
-        for i, tone in ipairs(TONES) do
-            if db.tone == tone then theme:SetPick(i) end
-        end
+    local themeCards = {}
+    for i, label in ipairs({ "Auto", "Native", "Dark" }) do
+        themeCards[TONES[i]] = Card(page, label, 74, 22, function()
+            db.tone = TONES[i]
+            for n = 1, #toneFollowers do toneFollowers[n]() end
+            FN:RefreshOptions()
+        end)
     end
 
     -- The floating window and the docked panel each keep their own scale (scale and
     -- dockScale), so a size chosen for one never carries into the other. Both show; only the
     -- one in use can be changed. Scaling the docked panel's contents can spill them past it.
-    local scaleTitle = GroupTitle("Scale", -134, true)
+    local scaleTitle = SubHead(page, "Scale")
     local experimental = Label(page, "GameFontNormalSmall", "EXPERIMENTAL")
     experimental:SetTextColor(1, 0.25, 0.25)
     local font, size, flags = experimental:GetFont()
     if font and size then experimental:SetFont(font, math.max(size - 2, 8), flags) end -- a step smaller than the label
-    experimental:SetPoint("BOTTOMLEFT", scaleTitle, "BOTTOMRIGHT", 6, 0)
-    local function ScaleSlider(text, key, y)
-        local holder = Slider(page, text, 0.7, 1.5, 0.05, "%.2fx",
+    local function ScaleSlider(text, key)
+        return Slider(page, text, 0.7, 1.5, 0.05, "%.2fx",
             function() return db[key] end,
             function(v)
                 db[key] = v
                 frame:SetScale(v)
                 FN:UpdateDock()
             end, true)
-        holder:SetPoint("TOPLEFT", 0, y)
-        return holder
     end
-    local dockedScale = ScaleSlider("Docked Panel", "dockScale", -156)
-    local floatingScale = ScaleSlider("Floating Panel", "scale", -196)
+    local dockedScale = ScaleSlider("Docked Panel", "dockScale")
+    local floatingScale = ScaleSlider("Floating Panel", "scale")
     local function ScaleInUse()
         local docked = frame and frame.docked or false
         for holder, active in pairs({ [dockedScale] = docked, [floatingScale] = not docked }) do
@@ -4016,7 +4788,6 @@ local function BuildSettingsPage(columnA, columnB)
             holder.Sync()
         end
     end
-    sectionWidthFollowers[#sectionWidthFollowers + 1] = ScaleInUse
     syncers[#syncers + 1] = ScaleInUse
     local resetScale = Card(page, "Reset scaling", 110, 22, function()
         db.dockScale, db.scale = FN.defaults.dockScale, FN.defaults.scale
@@ -4024,23 +4795,20 @@ local function BuildSettingsPage(columnA, columnB)
         FN:UpdateDock()
         ResyncAll()
     end)
-    resetScale:SetPoint("TOP", 0, -238)
 
-    GroupTitle("Addon Buttons", -278, true)
-    Check(page, "Show the minimap button",
+    local buttonsTitle = SubHead(page, "Addon Buttons")
+    local miniButton = Check(page, "Show the |cffffd100minimap|r button",
         function() return FN:MinimapButtonShown() end,
-        function(v) FN:SetMinimapButtonShown(v and true or false) end):SetPoint("TOPLEFT", 0, -300)
-    Check(page, "Show the world map button",
+        function(v) FN:SetMinimapButtonShown(v and true or false) end)
+    local mapButton = Check(page, "Show the |cffffd100world map|r button",
         function() return FN:MapButtonShown() end,
-        function(v) FN:SetMapButtonShown(v and true or false) end):SetPoint("TOPLEFT", 0, -324)
+        function(v) FN:SetMapButtonShown(v and true or false) end)
     -- The button can always be dragged around the map; locked, it stays where it is.
-    local lockButton = Check(page, "Lock the world map button",
+    local lockButton = Check(page, "Lock the |cffffd100world map|r button",
         function() return FN:MapButtonLocked() end,
         function(v) FN:SetMapButtonLocked(v and true or false) end)
-    lockButton:SetPoint("TOPLEFT", 0, -348)
     -- Back to its place above the quest log's arrow; rests until the button has been moved.
     local resetButton = Card(page, "Reset position", 104, 22, function() FN:ResetMapButton() end)
-    resetButton:SetPoint("TOPRIGHT", 0, -347)
     syncers[#syncers + 1] = function()
         local shown = FN:MapButtonShown()
         lockButton:SetEnabled(shown)
@@ -4049,6 +4817,54 @@ local function BuildSettingsPage(columnA, columnB)
         resetButton:SetEnabled(moved)
         resetButton:SetAlpha(moved and 1 or 0.4)
     end
+
+    local function LayoutInterface()
+        local IND, GAP = LOOK_IND, LOOK_GAP
+        local width = sectionInner - 2 * IND
+        local y
+        local function At(f, height, x)
+            f:ClearAllPoints()
+            f:SetPoint("TOPLEFT", x or IND, -y)
+            y = y + height + GAP
+        end
+        y = panelTitle.Place(SECTION_TOP, true, true)
+        At(dockBox, 20)
+        -- Its note right under the box's label.
+        dockHint:ClearAllPoints()
+        dockHint:SetPoint("TOPLEFT", IND + (Stock() and 29 or 21), -(y - GAP - 2))
+        y = y + 8
+
+        y = themeTitle.Place(y, true)
+        PlaceRow(themeCards, TONES, y, width, db.tone, true, IND, 6)
+        y = y + 22 + GAP
+
+        y = scaleTitle.Place(y, true)
+        experimental:ClearAllPoints()
+        experimental:SetPoint("BOTTOMLEFT", scaleTitle.text, "BOTTOMRIGHT", 6, 0)
+        dockedScale:SetWidth(width)
+        At(dockedScale, 34)
+        floatingScale:SetWidth(width)
+        At(floatingScale, 34)
+        resetScale:ClearAllPoints()
+        resetScale:SetPoint("TOP", uiPage, "TOP", 0, -y)
+        y = y + 22 + GAP
+
+        y = buttonsTitle.Place(y, true)
+        At(miniButton, 20)
+        At(mapButton, 20)
+        At(lockButton, 20)
+        resetButton:ClearAllPoints()
+        resetButton:SetPoint("TOP", uiPage, "TOP", 0, -y)
+        y = y + 22 + GAP
+        uiSection.height = SectionHeight(y)
+    end
+    syncers[#syncers + 1] = LayoutInterface
+    sectionWidthFollowers[#sectionWidthFollowers + 1] = function()
+        LayoutInterface()
+        ScaleInUse()
+    end
+    LayoutInterface()
+    end -- Interface
 
     -- Last of all on every sync: stack the sections at their current sizes.
     syncers[#syncers + 1] = function() Relayout(false) end
@@ -4740,9 +5556,10 @@ local function ApplyLayout()
     UseQuestBorder(nav, merged and Stock(), true) -- the tab row is on top: its crest goes at the bottom
     -- With the ornate border the scroll marker sits outside the box, in the strip
     -- the quest log uses for its scroll bar.
-    local thumbOffset = (merged and Stock()) and 33 or 0
     nodesPage.scroll.thumbOffset = (merged and Stock()) and 33 or 6
-    settingsScroll.thumbOffset = thumbOffset
+    -- (the settings' marker lines up with the node list's: the list's area bleeds out further,
+    -- so the settings one goes 7px further out to sit the same distance from the border)
+    settingsScroll.thumbOffset = (merged and Stock()) and 33 or 7
     frame.pageWidth = (merged and (mergedWidth - 20)) or (narrow and (DOCK_WIDTH - 40))
         or (WIDTH - NAV_WIDTH - 48)
 
@@ -4829,8 +5646,9 @@ local function ApplyLayout()
     local pageWidth = frame.pageWidth
     -- Stacked in the side panel, the sections run the panel's full width; side by side
     -- in the window they keep their fixed width.
-    -- (pageWidth + 1 leaves the same margin on the right as the panel leaves on the left.)
-    local sectionWidth = narrow and math.floor(pageWidth + 1) or SECTION_WIDTH
+    -- (Exactly the list's width: a pixel more put the sections' right border lines just past the
+    -- list's edge, where they were cut off.)
+    local sectionWidth = narrow and math.floor(pageWidth) or SECTION_WIDTH
     for i = 1, #sectionWidthFollowers do sectionWidthFollowers[i](sectionWidth) end
     columnB:ClearAllPoints()
     if narrow then
@@ -4973,6 +5791,8 @@ local function CreateOptions()
     columnB = CreateFrame("Frame", nil, settingsScroll.child)
     columnB:SetSize(256, COLUMN_B_HEIGHT)
     BuildSettingsPage(columnA, columnB)
+    -- The open section's header stays at the top while its settings scroll under it.
+    settingsScroll:HookScript("OnVerticalScroll", function() FN:UpdateSettingsPins() end)
 
     frame:SetScript("OnShow", function()
         -- A fresh opening: the gold flash and rank-line shimmer may play again.
@@ -5747,7 +6567,7 @@ local function BuildPicker()
 
     local about = Label(picker, "GameFontHighlightSmall",
         "How nodes in range show on your minimap, beside the game's own node dot. "
-        .. "You can change it anytime in Settings > Nearby nodes.")
+        .. "You can change it anytime in Settings > Look & Feel > Nearby.")
     about:SetWidth(picker:GetWidth() - 36)
     about:SetJustifyH("CENTER")
     if about.SetWordWrap then about:SetWordWrap(true) end
