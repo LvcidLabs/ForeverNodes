@@ -1,3 +1,9 @@
+## 1.5.5
+
+**Changes**
+
+- Node Colors: the fish pools list the schools on the left and the floating pools on the right.
+
 ## 1.5.4
 
 **New**

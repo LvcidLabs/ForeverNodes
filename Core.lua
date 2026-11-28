@@ -1395,7 +1395,7 @@ local WHATS_NEW = "Settings revamp, new color options"
 local WHATS_NEW_LOOK = 5 -- (raise it when the line's look changes, so it shows again)
 
 function FN:PrintLogin(always)
-    local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.5.4"
+    local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.5.5"
     -- Logo, gold name, ring-gold version, grey "by", white author, a grey dash, gold /fn,
     -- and the button name fading letter by letter from the logo's lime to its cyan.
     -- The hint names the quickest way in that this player has on screen.

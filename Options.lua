@@ -3682,17 +3682,23 @@ local function BuildSettingsPage(columnA, columnB)
         sagefish_school = "sagefish", greater_sagefish_school = "sagefish",
         floating_debris = "floating", floating_wreckage = "floating", pool_floating_debris_wreckage = "floating",
     }
-    -- Ores are laid out by hand: the usual progression down the left, the extras down the right.
+    -- Ores and fish pools are laid out by hand: ores with the usual progression down the left and
+    -- the extras down the right; pools with the schools left and the floating ones right.
     local PLACE = {}
-    for side, keys in pairs({
+    for _, layout in ipairs({ {
         left = { "copper_vein", "tin_vein", "silver_vein", "truesilver_deposit", "starsilver_vein",
             "iron_deposit", "cold_iron_deposit", "dark_iron_deposit", "mithril_deposit",
             "small_thorium_vein", "rich_thorium_vein", "heavy_thorium_vein" },
         right = { "gold_vein", "fools_gold_vein", "chunk_of_amber", "large_chunk_of_amber",
             "incendicite_mineral_vein", "lesser_bloodstone_deposit", "greater_moonstone_formation",
             "small_obsidian_chunk", "large_obsidian_chunk" },
-    }) do
-        for rank, key in ipairs(keys) do PLACE[key] = { side, rank } end
+    }, {
+        left = { "firefin_snapper_school", "oily_blackmouth_school", "sagefish_school", "greater_sagefish_school" },
+        right = { "floating_debris", "floating_wreckage", "pool_floating_debris_wreckage" },
+    } }) do
+        for side, keys in pairs(layout) do
+            for rank, key in ipairs(keys) do PLACE[key] = { side, rank } end
+        end
     end
     -- Two columns: types laid out by hand (PLACE) in their places first; the rest split into
     -- their families (each in order), each family to the shorter column at the time.
