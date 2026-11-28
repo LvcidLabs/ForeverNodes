@@ -4869,6 +4869,10 @@ local function CreateOptions()
     -- live on a separate `shell`, hidden while the panel is merged into the map
     -- window (the map window is the frame then).
     frame = CreateFrame("Frame", "ForeverNodesOptions", UIParent)
+    -- OpenMap's tray button shows whether this is open: told as it opens or closes.
+    local function OpenChanged() if FN.RefreshOpenMapTray then FN:RefreshOpenMapTray() end end
+    frame:HookScript("OnShow", OpenChanged)
+    frame:HookScript("OnHide", OpenChanged)
     local shell = stock and TryTemplate("Frame", nil, frame, "BasicFrameTemplate")
     local framed = shell ~= nil -- Blizzard's template supplied the border, title bar and close button
     shell = shell or CreateFrame("Frame", nil, frame)
@@ -5444,6 +5448,11 @@ function FN:ShowProfessionSettings()
     FN:OpenSettingsSection("colors")
     settingsScroll:SetVerticalScroll(0)
     settingsScroll:Update()
+end
+
+-- Whether Forever Nodes is open (the side panel, or the window with docking off).
+function FN:MapPanelOpen()
+    return frame and frame:IsShown() or false
 end
 
 -- The world map button: the side panel, swapping places with the quest log.

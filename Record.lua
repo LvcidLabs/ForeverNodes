@@ -25,6 +25,7 @@ local KNOWN = {
     firefin_snapper_school = { 180902, 180683, 180657, 180752 },
     oily_blackmouth_school = { 180750, 180900, 180682, 180664, 180582 },
     sagefish_school = { 180656, 180663 },
+    greater_sagefish_school = { 180684 },
     floating_debris = { 180655 },
     floating_wreckage = { 180685, 180662, 180901, 180751 },
 }
@@ -36,7 +37,6 @@ end
 -- Pool types the game has but the bundled data has no locations for.
 local NAMES = {
     [180658] = "School of Deviate Fish",
-    [180684] = "Greater Sagefish School",
     [180712] = "Stonescale Eel Swarm",
     [180753] = "Patch of Elemental Water",
     [180248] = "School of Tastyfish",
@@ -49,8 +49,7 @@ local NAMES = {
 local POOL_WORDS = { "School", "Swarm", "Wreckage", "Debris", "Patch of", "Churning", "Pool" }
 
 local function Say(text)
-    -- The same yellow star marker the login line starts with.
-    print("|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:0|t |cffffd100Forever Nodes:|r " .. text)
+    print(FN.CHAT_TAG .. text)
 end
 
 local function Debug(text)
@@ -150,12 +149,14 @@ function FN:LoadRecorded()
     -- Herbs once taken for pools (picked soon after a fishing cast) are dropped.
     local herbOrOre = FN.gatherKeyByID or {}
     for key, info in pairs(db.recordedNodes) do
+        -- A pool recorded by its object ID is saved as "pool_<id>".
+        local poolID = tonumber(key:match("^pool_(%d+)$"))
+        local into = info.id and herbOrOre[info.id] or poolID and keyByID[poolID]
         if info.kind == "fish" and info.id and herbOrOre[info.id] then
             db.recordedNodes[key], db.recordedPoints[key] = nil, nil
-        elseif info.id and herbOrOre[info.id] and herbOrOre[info.id] ~= key then
-            -- A herb or ore recorded as new that the bundled list has since added (Marefoil):
-            -- its spots move to the bundled type, and its tick with them.
-            local into = herbOrOre[info.id]
+        elseif into and into ~= key then
+            -- A type recorded as new that the bundled list has since added (Marefoil, Greater
+            -- Sagefish School): its spots move to the bundled type, and its tick with them.
             local from = db.recordedPoints[key]
             if type(from) == "table" then
                 db.recordedPoints[into] = db.recordedPoints[into] or {}

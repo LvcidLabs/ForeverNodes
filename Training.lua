@@ -27,12 +27,16 @@ local COST = {
 
 -- Character level needed per rank. Forever removed them for Herbalism and Mining
 -- (confirmed: Artisan offered at level 25). Fishing keeps them: Expert book 20
--- (confirmed), Artisan quest 35 (Wowhead), Journeyman 10 (Classic, unconfirmed).
+-- (confirmed), Artisan quest 35 (confirmed), Journeyman 10 (Classic, unconfirmed).
 local LEVEL = {
     herb = { 0, 0, 0, 0 },
     ore  = { 0, 0, 0, 0 },
     fish = { 0, 10, 20, 35 },
 }
+
+-- Skill needed per rank where it differs from FN.RANKS: Nat Pagle's Artisan quest
+-- wants 225 Fishing, not 200 (confirmed in game).
+local SKILL = { fish = { [4] = 225 } }
 
 -- Index of the rank whose cap is `max` (0 when nothing is learned).
 local function RankIndex(max)
@@ -51,7 +55,7 @@ function FN:NextRank(kind)
     if not r then return nil end
     local learned = FN.db and FN.db.learned and FN.db.learned[kind] and FN.db.learned[kind][r.name]
     return {
-        index = i, name = r.name, cap = r.cap, skill = r.skill,
+        index = i, name = r.name, cap = r.cap, skill = (SKILL[kind] and SKILL[kind][i]) or r.skill,
         level = (learned and learned.level) or LEVEL[kind][i],
         cost = COST[kind][i],
     }
@@ -428,7 +432,7 @@ end
 -- Chat messages --------------------------------------------------------------------------
 -- Each one is said once per character: the "told" table remembers what was sent.
 
-local TAG = "|cffffd100[Forever Nodes]|r "
+local function Tag() return FN.CHAT_TAG end
 
 local function Hex(kind)
     local c = FN.db and FN.db.colors and FN.db.colors[kind] or { 1, 1, 1 }
@@ -438,7 +442,7 @@ end
 local function Colored(kind, text) return "|cff" .. Hex(kind) .. text .. "|r" end
 
 local function Say(text)
-    if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage(TAG .. text, 1, 1, 1) end
+    if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage(Tag() .. text, 1, 1, 1) end
 end
 
 local function Told(key)

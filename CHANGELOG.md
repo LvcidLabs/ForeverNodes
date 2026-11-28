@@ -1,3 +1,21 @@
+## 1.5.3
+
+**New**
+
+- OpenMap tray button: star Forever Nodes in OpenMap's menu to put it on the map's button tray. Left click opens or closes the panel, right click turns the world map icons on or off, and it has a gold edge while the panel is open. While it's on the tray, the Forever Nodes map button steps aside. The right click needs OpenMap v0.8.14 or newer.
+- Added Greater Sagefish School, with spots on the lake in Alterac Mountains. If you recorded it yourself before, those spots join the bundled ones.
+- `/fn version` shows the version line again.
+
+**Changes**
+
+- Forever Nodes chat messages now start with the addon's logo, and the login line has new colors.
+- Fishing's Artisan rank from Nat Pagle now asks for 225 Fishing (and level 35), as the game does.
+- New spots: Firefin Snapper School in Desolace, Peacebloom in Durotar and Sagefish School in Silverpine Forest.
+
+**Fixes**
+
+- Removed a Floating Wreckage spot that is now inside Dalaran.
+
 ## 1.5.2
 
 **New**

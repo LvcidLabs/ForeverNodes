@@ -133,7 +133,20 @@ local function SetupWorldMapButton()
         local settings = OpenMapOn() and type(OpenMapDB) == "table" and OpenMapDB.worldmap
         return type(settings) == "table" and settings.enabled ~= false and settings.presetAsked == false
     end
+    -- Starred onto OpenMap's button tray (see SetupOpenMapTray), Forever Nodes has a button there,
+    -- so ours steps aside. OpenMap keeps its starred buttons in OpenMapDB.worldmap.favorites.
+    local TRAY_ID = "ext.ForeverNodes.panel"
+    local function OnOpenMapTray()
+        local settings = OpenMapOn() and type(OpenMapDB) == "table" and OpenMapDB.worldmap
+        if not (type(settings) == "table" and settings.enabled ~= false and settings.mapButtons ~= false
+            and type(settings.favorites) == "table") then return false end
+        for _, id in ipairs(settings.favorites) do
+            if id == TRAY_ID then return true end
+        end
+        return false
+    end
     local btn = CreateFrame("Button", "ForeverNodesWorldMapButton", map)
+    local function ShowWanted() return FN.db.mapButtonShown and not OnOpenMapTray() end
     btn:SetSize(26, 26)
     btn:SetFrameLevel(math.min(map:GetFrameLevel() + 2000, 9900))
 
@@ -405,10 +418,24 @@ local function SetupWorldMapButton()
         end
 
         Anchor()
-        btn:SetShown(FN.db.mapButtonShown)
+        btn:SetShown(ShowWanted())
     end
     Place()
     map:HookScript("OnShow", Place)
+    -- Starring or unstarring on OpenMap's menu tells us nothing: looked at a few times a second
+    -- while the map is open (a table read, nothing more).
+    if OpenMapOn() then
+        local trayWatch, wasOnTray, since = CreateFrame("Frame", nil, map), nil, 0
+        trayWatch:SetScript("OnUpdate", function(_, elapsed)
+            since = since + elapsed
+            if since < 0.25 then return end
+            since = 0
+            local onTray = OnOpenMapTray()
+            if onTray == wasOnTray then return end
+            wasOnTray = onTray
+            btn:SetShown(ShowWanted())
+        end)
+    end
 
     -- First install: the first time the map opens it dims, except for a circle around this
     -- button, with a note beside it. "Quick Tutorial" walks through the panel step by step.
@@ -759,7 +786,7 @@ local function SetupWorldMapButton()
     function FN:SetMapButtonShown(shown)
         FN.db.mapButtonShown = shown
         if not shown then StopDragging() end
-        btn:SetShown(shown)
+        btn:SetShown(ShowWanted())
         if FN.RefreshOptions then FN:RefreshOptions() end
     end
     function FN:MapButtonLocked() return FN.db.mapButtonLocked and true or false end
@@ -783,6 +810,45 @@ function FN:ToggleWorldMapIcons()
     FN.db.worldmap = not FN.db.worldmap
     FN:Refresh()
     if FN.RefreshOptions then FN:RefreshOptions() end -- the "Show on world map" tick box
+end
+
+-- OpenMap's button tray --------------------------------------------------------------
+-- With OpenMap, Forever Nodes can be starred onto its map's button tray, working like our own map
+-- button: left click opens or closes the panel, right click turns the map icons on or off (a
+-- right click needs OpenMap's API version 5; older versions leave it out).
+
+local function SetupOpenMapTray()
+    local OM = OpenMapAPI
+    if not (OM and OM.RegisterMenuToggle) then return end
+    -- The switch is the panel: gold-edged while it is open, and never greyed (newer OpenMap; an
+    -- older one greys it while closed).
+    local spec = {
+        id = "panel",
+        label = TITLE,
+        icon = FN.MEDIA .. "icon_dots", -- just the dots, filling OpenMap's square
+        section = TITLE,
+        get = function() return FN:MapPanelOpen() end,
+        set = function(on)
+            if on ~= FN:MapPanelOpen() then FN:ToggleMapPanel() end
+        end,
+        grey = false,
+        onRightClick = function() FN:ToggleWorldMapIcons() end,
+        rightClickTip = "Map icons on or off",
+    }
+    OM.RegisterMenuToggle("ForeverNodes", spec)
+    -- OpenMap reads the button's look only when it redraws its menu: asked to again as the panel
+    -- opens or closes (by our own map button, Esc, ...).
+    local wasOpen = FN:MapPanelOpen()
+    function FN:RefreshOpenMapTray()
+        local open = FN:MapPanelOpen()
+        if open == wasOpen then return end
+        wasOpen = open
+        if OM.RefreshMenuToggles then
+            OM.RefreshMenuToggles()
+        else
+            OM.RegisterMenuToggle("ForeverNodes", spec) -- registering the same one redraws it
+        end
+    end
 end
 
 -- Minimap button -------------------------------------------------------------------
@@ -1069,5 +1135,6 @@ function FN:SetupButtons()
     SetupWorldMapButton()
     FN:SetupMapPanel()
     SetupMinimapButton()
+    SetupOpenMapTray()
     SetupSettingsPage()
 end

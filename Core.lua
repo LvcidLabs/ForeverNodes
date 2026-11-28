@@ -16,6 +16,9 @@ local REAPPEAR = 3      -- extra yards before a circle turns back into a picture
 
 local MEDIA = "Interface\\AddOns\\" .. ADDON .. "\\Icons\\"
 FN.MEDIA = MEDIA
+-- Starts every chat line: the addon's logo (as in the addon list), then its name in gold.
+FN.CHAT_ICON = "|T" .. MEDIA .. "icon:0|t "
+FN.CHAT_TAG = FN.CHAT_ICON .. "|cffffd100Forever Nodes:|r "
 local DISC = MEDIA .. "disc"
 
 -- A ring whose line is `line` px wide at `diameter` px across. The art comes in
@@ -129,7 +132,7 @@ end
 -- Node types added in an update (herbs found since, like Marefoil) come ticked for a character
 -- that already gathers that kind (has any of its types ticked); a new character starts empty
 -- as before. ForeverNodesCharDB.known holds every type the character has had the chance to tick.
-local ADDED_LATER = { marefoil = true } -- types that came after the list was first remembered
+local ADDED_LATER = { marefoil = true, greater_sagefish_school = true } -- types that came after the list was first remembered
 function FN:TickNewNodes()
     local char = ForeverNodesCharDB
     if not char then return end
@@ -1264,7 +1267,7 @@ local function PrintPoleInfo()
     for _, node in ipairs(FN.nodes) do
         if node.kind == "fish" and FN.enabled[node.key] then pools = pools + 1 end
     end
-    print(("|cffffd100Forever Nodes|r main hand item %s, class %s, subclass %s, fishing pole: %s, pool types ticked: %d")
+    print((FN.CHAT_TAG .. "main hand item %s, class %s, subclass %s, fishing pole: %s, pool types ticked: %d")
         :format(tostring(id), tostring(classID), tostring(subClassID), tostring(CheckPole()), pools))
 end
 
@@ -1294,15 +1297,7 @@ driver:SetScript("OnEvent", function(self, event, arg1)
             end
         end
         FN:SetupButtons()
-        local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.5.2"
-        -- Gold name, white version, gold author; the hint goes on its own indented line.
-        -- The yellow star is the game's own raid target marker, drawn at text height.
-        -- The hint names the quickest way in that this player has on screen.
-        local button = db.mapButtonShown and "map button"
-            or (FN.MinimapButtonShown and FN:MinimapButtonShown() and "minimap button")
-        local also = button and ("|cffffffff or |r|cffffd100" .. button .. "|r") or ""
-        print(("|cffffd100<Forever Nodes>|r |cffffffffv%s by Lvcid|r"
-            .. " |cffffffff(|r|cffffd100/fn|r%s|cffffffff to open)|r"):format(version, also))
+        FN:PrintLogin()
     elseif event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_EQUIPMENT_CHANGED" then
         local pole = CheckPole()
         if pole ~= poleEquipped then
@@ -1322,17 +1317,43 @@ driver:SetScript("OnEvent", function(self, event, arg1)
     end
 end)
 
+-- The login line (also /fn version).
+function FN:PrintLogin()
+    local version = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON, "Version") or "1.5.3"
+    -- Logo, gold name, ring-gold version, grey "by", white author, a grey dash, gold /fn,
+    -- and the button name fading letter by letter from the logo's lime to its cyan.
+    -- The hint names the quickest way in that this player has on screen.
+    local GREY = "|cffa0a0a0"
+    local function Fade(word)
+        local from, to, out, n = { 0x7f, 0xd6, 0x51 }, { 0x55, 0xe6, 0xe6 }, {}, #word
+        for i = 1, n do
+            local t = n > 1 and (i - 1) / (n - 1) or 0
+            local function M(k) return math.floor(from[k] + (to[k] - from[k]) * t + 0.5) end
+            out[i] = ("|cff%02x%02x%02x%s|r"):format(M(1), M(2), M(3), word:sub(i, i))
+        end
+        return table.concat(out)
+    end
+    local button = db.mapButtonShown and "map button"
+        or (FN.MinimapButtonShown and FN:MinimapButtonShown() and "minimap button")
+    local also = button and (GREY .. " or |r" .. Fade(button)) or ""
+    print(FN.CHAT_ICON .. "|cffffd100Forever Nodes|r |cffc8a050v" .. version .. "|r"
+        .. GREY .. " by |r|cffffffffLvcid|r" .. GREY .. " — |r"
+        .. "|cffffd100/fn|r" .. also .. GREY .. " to open|r")
+end
+
 SLASH_FOREVERNODES1 = "/fn"
 SLASH_FOREVERNODES2 = "/fnodes"
 SLASH_FOREVERNODES3 = "/forevernodes"
 SlashCmdList.FOREVERNODES = function(text)
     text = text and text:lower() or ""
     local command = text:match("^%s*(%a+)")
+    -- Prints the login line again (version, author, how to open).
+    if command == "version" then FN:PrintLogin() return end
     if command == "help" or command == "tutorial" or command == "dfl" then
         db.spotlightDue = true
         -- dfl: the whole first launch again, the style picker after Okay included.
         if command == "dfl" then db.styleOffered = nil end
-        print("|cffffd100Forever Nodes:|r the quick guide shows the next time the world map opens")
+        print(FN.CHAT_TAG .. "the quick guide shows the next time the world map opens")
         return
     end
     if command == "style" then
@@ -1344,14 +1365,14 @@ SlashCmdList.FOREVERNODES = function(text)
     elseif text:match("^%s*ttdebug") then
         -- Prints what the minimap tooltip matching sees (widths, candidates, learned padding).
         FN.tipDebug = not FN.tipDebug
-        print("|cffffd100Forever Nodes:|r minimap tooltip debug " .. (FN.tipDebug and "on" or "off"))
+        print(FN.CHAT_TAG .. "minimap tooltip debug " .. (FN.tipDebug and "on" or "off"))
     elseif text:match("^%s*ttreset") then
         db.tipWidthPads = nil
-        print("|cffffd100Forever Nodes:|r minimap tooltip widths forgotten; they are learned again")
+        print(FN.CHAT_TAG .. "minimap tooltip widths forgotten; they are learned again")
     elseif text:match("^%s*debug") then
         -- Prints where fishing loot came from, to check that pool recording sees pools.
         db.debug = not db.debug
-        print("|cffffd100Forever Nodes:|r debug messages " .. (db.debug and "on" or "off"))
+        print(FN.CHAT_TAG .. "debug messages " .. (db.debug and "on" or "off"))
     else
         FN:OpenFromCommand()
     end
