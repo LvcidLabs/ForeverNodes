@@ -1266,11 +1266,22 @@ local function RefreshNodes()
                 if not hide then list[#list + 1] = node end
             end
         end
+        -- Fish pools have no skill level: the schools come first (in this order when sorted by
+        -- level), then the floating pools (debris and wreckage, recorded ones too).
+        local SCHOOL = { firefin_snapper_school = 1, oily_blackmouth_school = 2, sagefish_school = 3,
+            greater_sagefish_school = 4 }
+        local function Floating(node) return node.kind == "fish" and node.name:find("Floating") ~= nil end
         if db.sort == "name" then
-            table.sort(list, function(a, b) return a.name < b.name end)
+            table.sort(list, function(a, b)
+                if Floating(a) ~= Floating(b) then return Floating(b) end
+                return a.name < b.name
+            end)
         else
             table.sort(list, function(a, b)
                 if a.skill ~= b.skill then return a.skill < b.skill end
+                if Floating(a) ~= Floating(b) then return Floating(b) end
+                local ra, rb = SCHOOL[a.key] or 9, SCHOOL[b.key] or 9
+                if ra ~= rb then return ra < rb end
                 return a.name < b.name
             end)
         end

@@ -2,7 +2,7 @@
 
 **Changes**
 
-- Node Colors: the fish pools list the schools on the left and the floating pools on the right.
+- Fish pools are listed schools first (Firefin, Oily Blackmouth, Sagefish, Greater Sagefish), then the floating pools: in the Fishing list, and in Node Colors with the schools on the left and the floating pools on the right.
 
 ## 1.5.4
 
